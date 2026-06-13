@@ -1,0 +1,6 @@
+[project]
+name = "marshall_research"
+version = "0.1.0"
+description = "Marshall Research agent package"
+requires-python = ">=3.10"
+dependencies = []

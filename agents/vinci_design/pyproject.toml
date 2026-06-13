@@ -1,0 +1,6 @@
+[project]
+name = "vinci_design"
+version = "0.1.0"
+description = "Vinci Design agent package"
+requires-python = ">=3.10"
+dependencies = []

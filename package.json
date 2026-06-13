@@ -1,0 +1,13 @@
+{
+  "name": "shipstory-monorepo",
+  "private": true,
+  "version": "1.0.0",
+  "scripts": {
+    "dev:web": "turbo run dev --filter=web",
+    "build:web": "turbo run build --filter=web"
+  },
+  "devDependencies": {
+    "turbo": "^2.0.0"
+  },
+  "packageManager": "pnpm@10.18.3"
+}

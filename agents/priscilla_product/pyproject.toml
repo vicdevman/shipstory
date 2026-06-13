@@ -1,0 +1,6 @@
+[project]
+name = "priscilla_product"
+version = "0.1.0"
+description = "Priscilla Product agent package"
+requires-python = ">=3.10"
+dependencies = []

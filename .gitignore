@@ -1,0 +1,17 @@
+# Node dependencies & outputs
+node_modules/
+.next/
+dist/
+.turbo/
+
+# Python environments & locks
+.venv/
+__pycache__/
+*.pyc
+
+# Local Secrets & Configurations
+agents/.env
+agents/agent_config.yaml
+apps/web/.env.local
+
+mypythoncheatsheet.md
