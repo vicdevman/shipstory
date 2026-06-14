@@ -2,5 +2,12 @@
 name = "vinci_design"
 version = "0.1.0"
 description = "Vinci Design agent package"
-requires-python = ">=3.10"
-dependencies = []
+requires-python = ">=3.11"
+dependencies = [
+    "shared",
+    "band-sdk[crewai]>=1.0.0",   # ← Add
+    "python-dotenv>=1.2.2",       # ← Add for consistency
+]
+
+[tool.uv.sources]
+shared = { workspace = true }

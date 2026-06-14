@@ -3,7 +3,11 @@ name = "shipstory-agents"
 version = "0.1.0"
 description = "Multi-agent corporate departments network running on Band SDK"
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
+dependencies = [
+    "band-sdk[crewai]>=1.0.0",
+    "python-dotenv>=1.2.2",
+]
 
 [tool.uv]
 workspace = { members = ["shared", "devin_eng", "priscilla_product", "marshall_research", "gigi_marketing", "vinci_design", "connie_assistant"] }

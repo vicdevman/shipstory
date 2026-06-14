@@ -1,0 +1,8 @@
+Company Name: Nexus Labs
+Value Proposition: Local-first, AI-powered knowledge management app with sub-10ms peer-to-peer sync.
+Target Audience: Software engineers, developers, technical founders, productivity nerds.
+Voice and Tone: Minimalist, authoritative, transparent, utility-focused, developer-to-developer.
+Copywriting Constraints: 
+- Never use cheesy AI marketing catchphrases like 'revolutionizing the workspace' or 'in today's fast-paced world'.
+- Maintain a maximum threshold of 2 emojis per social media post.
+- Keep updates centered heavily on explicit engineering reality and tangible user metrics rather than abstract hyperbole.
