@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { promises as fs, existsSync } from 'fs';
 import path from 'path';
-import { connectMongoose, CompanyBrain, saveLocalFallback } from '@/lib/mongodb';
+import { connectMongoose, CompanyBrain, saveLocalFallback, getAgentConfig } from '@/lib/mongodb';
 
 function getDbPath() {
   const cwd = process.cwd();
@@ -108,20 +108,76 @@ export async function POST(request: Request) {
     }
     await saveLocalFallback(dbPath, state);
 
-    // Spawn the trigger script asynchronously
-    const { exec } = require('child_process');
-    const agentsDir = path.join(path.dirname(dbPath), '..');
-    exec('uv run python trigger_commit.py', { 
-      cwd: agentsDir,
-      env: { ...process.env, PYTHONPATH: '.', PYTHONUTF8: '1' }
-    }, (err: any, stdout: string, stderr: string) => {
-      if (err) {
-        console.error(`Failed to run trigger_commit.py: ${err.message}`);
-        console.error(`stderr: ${stderr}`);
-      } else {
-        console.log(`trigger_commit.py success: ${stdout}`);
+    // Send direct HTTP call to Band room API for commit trigger
+    let connieApiKey = process.env.CONNIE_API_KEY || '';
+    let devinId = process.env.DEVIN_AGENT_ID || '';
+
+    const agentConfig = getAgentConfig();
+    if (agentConfig) {
+      if (agentConfig.connie_assistant) {
+        connieApiKey = agentConfig.connie_assistant.api_key || connieApiKey;
+      } else if (agentConfig.devin_eng) {
+        connieApiKey = agentConfig.devin_eng.api_key || connieApiKey;
       }
-    });
+      if (agentConfig.devin_eng) {
+        devinId = agentConfig.devin_eng.agent_id || devinId;
+      }
+    }
+
+    const restUrl = process.env.BAND_REST_URL || process.env.THENVOI_REST_URL || 'https://app.band.ai/';
+
+    if (connieApiKey && state.room_id && devinId) {
+      const url = `${restUrl.replace(/\/$/, '')}/api/v1/agent/chats/${state.room_id}/messages`;
+      const commitMsg = rawInputs.commit_message || 'Manual Trigger Executed';
+      const filesList = rawInputs.changed_files || [];
+      const content = `[GITHUB_COMMIT] New commit triggered:\nMessage: ${commitMsg}\nFiles: ${filesList.join(', ')}\n\n@vicdevman/devin please review.`;
+
+      const bodyPayload = {
+        message: {
+          content: content,
+          mentions: [
+            {
+              id: devinId,
+              handle: 'vicdevman/devin',
+              name: 'Devin'
+            }
+          ]
+        }
+      };
+
+      fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-API-Key': connieApiKey
+        },
+        body: JSON.stringify(bodyPayload)
+      }).then(async (res) => {
+        if (!res.ok) {
+          const text = await res.text();
+          console.error(`[Band API] Failed to post commit trigger to Band room: ${res.status} ${text}`);
+        } else {
+          console.log(`[Band API] Successfully posted commit trigger to Band room.`);
+        }
+      }).catch((err) => {
+        console.error(`[Band API] Fetch error posting commit trigger to Band room:`, err);
+      });
+    } else {
+      console.warn(`[Band API] Cannot send commit trigger directly: missing connieApiKey (${!!connieApiKey}), room_id (${!!state.room_id}), or devinId (${!!devinId}). Spawning trigger_commit.py fallback.`);
+      const { exec } = require('child_process');
+      const agentsDir = path.join(path.dirname(dbPath), '..');
+      exec('uv run python trigger_commit.py', { 
+        cwd: agentsDir,
+        env: { ...process.env, PYTHONPATH: '.', PYTHONUTF8: '1' }
+      }, (err: any, stdout: string, stderr: string) => {
+        if (err) {
+          console.error(`Failed to run trigger_commit.py: ${err.message}`);
+          console.error(`stderr: ${stderr}`);
+        } else {
+          console.log(`trigger_commit.py success: ${stdout}`);
+        }
+      });
+    }
 
     return NextResponse.json({ success: true, session_id: sessionId, state });
   } catch (error) {

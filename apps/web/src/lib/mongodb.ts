@@ -63,3 +63,49 @@ export async function saveLocalFallback(dbPath: string, state: any): Promise<voi
     console.error(`[LocalFallback] Error saving to ${dbPath}:`, e);
   }
 }
+
+function parseAgentConfig(yamlText: string) {
+  const config: any = {};
+  let currentKey = '';
+  const lines = yamlText.split('\n');
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith('#')) continue;
+    if (trimmed.endsWith(':')) {
+      currentKey = trimmed.slice(0, -1).trim();
+      config[currentKey] = {};
+    } else if (currentKey && trimmed.includes(':')) {
+      const parts = trimmed.split(':');
+      const key = parts[0].trim();
+      const val = parts.slice(1).join(':').trim().replace(/['"]/g, '');
+      config[currentKey][key] = val;
+    }
+  }
+  return config;
+}
+
+export function getAgentConfig() {
+  const path = require('path');
+  const fs = require('fs');
+  const cwd = process.cwd();
+  const paths = [
+    path.join(cwd, '../../agents/agent_config.yaml'),
+    path.join(cwd, 'agents/agent_config.yaml'),
+    path.join(cwd, '../agents/agent_config.yaml'),
+    path.join(cwd, 'apps/web/../../agents/agent_config.yaml'),
+    'C:/Users/User/OneDrive/Desktop/projects/shipstory/agents/agent_config.yaml'
+  ];
+
+  for (const p of paths) {
+    try {
+      if (fs.existsSync(p)) {
+        const yamlText = fs.readFileSync(p, 'utf8');
+        return parseAgentConfig(yamlText);
+      }
+    } catch (e) {
+      console.warn(`Failed reading agent config path ${p}:`, e);
+    }
+  }
+  return null;
+}
+

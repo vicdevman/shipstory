@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { promises as fs } from 'fs';
 import path from 'path';
-import { connectMongoose, CompanyBrain, saveLocalFallback } from '@/lib/mongodb';
+import { connectMongoose, CompanyBrain, saveLocalFallback, getAgentConfig } from '@/lib/mongodb';
 
 function getDbPath() {
   const cwd = process.cwd();
@@ -96,20 +96,70 @@ export async function POST(request: Request) {
     }
     await saveLocalFallback(dbPath, state);
 
-    // Spawn trigger_chat.py asynchronously
-    const { exec } = require('child_process');
-    const agentsDir = path.join(path.dirname(dbPath), '..');
-    exec('uv run python trigger_chat.py', { 
-      cwd: agentsDir,
-      env: { ...process.env, PYTHONPATH: '.', PYTHONUTF8: '1' }
-    }, (err: any, stdout: string, stderr: string) => {
-      if (err) {
-        console.error(`Failed to run trigger_chat.py: ${err.message}`);
-        console.error(`stderr: ${stderr}`);
-      } else {
-        console.log(`trigger_chat.py success: ${stdout}`);
+    // Send direct HTTP call to Band room API
+    let connieId = process.env.CONNIE_AGENT_ID || '';
+    let devinApiKey = process.env.DEVIN_API_KEY || '';
+
+    const agentConfig = getAgentConfig();
+    if (agentConfig) {
+      if (agentConfig.connie_assistant) {
+        connieId = agentConfig.connie_assistant.agent_id || connieId;
       }
-    });
+      if (agentConfig.devin_eng) {
+        devinApiKey = agentConfig.devin_eng.api_key || devinApiKey;
+      }
+    }
+
+    const restUrl = process.env.BAND_REST_URL || process.env.THENVOI_REST_URL || 'https://app.band.ai/';
+
+    if (devinApiKey && state.room_id && connieId) {
+      const url = `${restUrl.replace(/\/$/, '')}/api/v1/agent/chats/${state.room_id}/messages`;
+      const bodyPayload = {
+        message: {
+          content: `vicdevman/connie ${message}`,
+          mentions: [
+            {
+              id: connieId,
+              handle: 'vicdevman/connie',
+              name: 'Connie'
+            }
+          ]
+        }
+      };
+
+      fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-API-Key': devinApiKey
+        },
+        body: JSON.stringify(bodyPayload)
+      }).then(async (res) => {
+        if (!res.ok) {
+          const text = await res.text();
+          console.error(`[Band API] Failed to post message to Band room: ${res.status} ${text}`);
+        } else {
+          console.log(`[Band API] Successfully posted message to Band room.`);
+        }
+      }).catch((err) => {
+        console.error(`[Band API] Fetch error posting message to Band room:`, err);
+      });
+    } else {
+      console.warn(`[Band API] Cannot send chat message directly: missing devinApiKey (${!!devinApiKey}), room_id (${!!state.room_id}), or connieId (${!!connieId}). Spawning trigger_chat.py fallback.`);
+      const { exec } = require('child_process');
+      const agentsDir = path.join(path.dirname(dbPath), '..');
+      exec('uv run python trigger_chat.py', { 
+        cwd: agentsDir,
+        env: { ...process.env, PYTHONPATH: '.', PYTHONUTF8: '1' }
+      }, (err: any, stdout: string, stderr: string) => {
+        if (err) {
+          console.error(`Failed to run trigger_chat.py: ${err.message}`);
+          console.error(`stderr: ${stderr}`);
+        } else {
+          console.log(`trigger_chat.py success: ${stdout}`);
+        }
+      });
+    }
 
     // Poll DB for Connie's response
     const maxPollTime = 12000; // 12 seconds max polling time
