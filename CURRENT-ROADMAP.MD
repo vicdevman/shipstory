@@ -207,7 +207,7 @@ The Company Brain is stored locally in `agents/shared/company_brain_db.json`.
 *   **Fix the Priscilla-Gigi Loop:** Update `deterministic_adapter.py` for Priscilla. When the post is approved, change the target mentions from `["@vicdevman/gigi"]` to `[]` (empty list) or tag the user `@vicdevman` / Connie `@vicdevman/connie`. This stops the message loop.
 *   **Strengthen Timezone-Safe Guard:** Ensure datetime parsing handles string mutations securely, making it robust across Vercel (UTC) and VPS system clocks.
 
-### Phase 2: Centralized Database Migration
+### Phase 2: Centralized Database Migration -COMPLETED - (PENDING VERCEL SERVER ISSUE RESOLVE).
 *   **Establish MongoDB Atlas:** Spin up a free cluster and get a `MONGODB_URI` connection string.
 *   **Update State Manager:** Rewrite `agents/shared/state_manager.py` to use `pymongo`. Store the state in a single document: `_id: "nexus_labs_brain"`.
 *   **Update Next.js Route Files:** Modify `/api/brain`, `/api/webhook`, `/api/chat`, and `/api/approve` to connect to MongoDB using the `mongodb` npm package.
@@ -260,7 +260,8 @@ We have completed the discovery phase. We have successfully mapped the architect
 Please review the prioritized roadmap and the findings above. When you are ready, let me know which step you would like to tackle first!
 
 ------- my additions...
-1. well also fix the run once process have history runs not only active one, 
-2. integrate actual github to see commits and code diff, 
-3. integrate socials x and linkeind and or a copy button for content genrated content should be in a big text area that can be edited and tehn pushed or copied easily.
-4. web responsiveness for smaller screens, currently very fine on desktop
+1. activate the simulate button once process finishes.
+2. well also fix the run once process have history runs not only active one, 
+3. integrate actual github to see commits and code diff, 
+4. integrate socials x and linkeind and or a copy button for content genrated content should be in a big text area that can be edited and tehn pushed or copied easily.
+5. web responsiveness for smaller screens, currently very fine on desktop

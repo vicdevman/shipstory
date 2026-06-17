@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { promises as fs } from 'fs';
 import path from 'path';
-import { getMongoCollection, saveLocalFallback } from '@/lib/mongodb';
+import { connectMongoose, CompanyBrain, saveLocalFallback } from '@/lib/mongodb';
 
 function getDbPath() {
   const cwd = process.cwd();
@@ -32,14 +32,11 @@ export async function POST(request: Request) {
 
     const dbPath = getDbPath();
     let state: any = null;
-    const collection = await getMongoCollection();
-
-    if (collection) {
-      try {
-        state = await collection.findOne({ _id: "nexus_labs_brain" });
-      } catch (err) {
-        console.error('[Chat API] Error loading state from MongoDB:', err);
-      }
+    try {
+      await connectMongoose();
+      state = await CompanyBrain.findOne({ _id: "nexus_labs_brain" }).lean();
+    } catch (err) {
+      console.error('[Chat API] Error loading state from MongoDB:', err);
     }
 
     if (!state) {
@@ -91,14 +88,11 @@ export async function POST(request: Request) {
     state.current_session.chat_history.push(userMessageObj);
     const initialLength = state.current_session.chat_history.length;
 
-    // Save state back to DB with the user's message
-    if (collection) {
-      try {
-        state._id = "nexus_labs_brain";
-        await collection.replaceOne({ _id: "nexus_labs_brain" }, state, { upsert: true });
-      } catch (err) {
-        console.error('[Chat API] Error saving state to MongoDB:', err);
-      }
+    try {
+      state._id = "nexus_labs_brain";
+      await CompanyBrain.replaceOne({ _id: "nexus_labs_brain" }, state, { upsert: true });
+    } catch (err) {
+      console.error('[Chat API] Error saving state to MongoDB:', err);
     }
     await saveLocalFallback(dbPath, state);
 
@@ -129,8 +123,10 @@ export async function POST(request: Request) {
 
       try {
         let updatedState: any = null;
-        if (collection) {
-          updatedState = await collection.findOne({ _id: "nexus_labs_brain" });
+        try {
+          updatedState = await CompanyBrain.findOne({ _id: "nexus_labs_brain" }).lean();
+        } catch (pollErr) {
+          console.error('[Chat API] Error polling state from MongoDB:', pollErr);
         }
         if (!updatedState) {
           const fileContent = await fs.readFile(dbPath, 'utf8');
@@ -161,13 +157,11 @@ export async function POST(request: Request) {
       };
       state.current_session.chat_history.push(timeoutMsg);
       
-      if (collection) {
-        try {
-          state._id = "nexus_labs_brain";
-          await collection.replaceOne({ _id: "nexus_labs_brain" }, state, { upsert: true });
-        } catch (err) {
-          console.error('[Chat API] Error saving timeout state to MongoDB:', err);
-        }
+      try {
+        state._id = "nexus_labs_brain";
+        await CompanyBrain.replaceOne({ _id: "nexus_labs_brain" }, state, { upsert: true });
+      } catch (err) {
+        console.error('[Chat API] Error saving timeout state to MongoDB:', err);
       }
       await saveLocalFallback(dbPath, state);
     }
