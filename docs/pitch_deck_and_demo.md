@@ -41,3 +41,50 @@ Script: "Look at the Band session state. Devin, our Engineering Agent, parses th
 Visual: Switch to the "Strategic Recommendations" panel on the dashboard.
 Script: "But here's the magic: ShipStory doesn't just push. It listens. Connie has analyzed user comments about syncing issues, and Marshall has flagged that Competitor Y just dropped their offline mode. Right here, the system presents an actionable Recommendation: Pivot roadmap to prioritize Offline-First indicators. I click 'Approve Recommendation' and our Company Brain's active roadmap updates instantly. Alongside it, our pristine 'Ready to Ship' cards showing our X Thread, Changelog, and Generated Graphic are set. I click 'Approve and Ship' to push our brand new marketing assets to the world. A complete, brand-compliant, competitor-aware campaign and updated product strategy, built from raw code in seconds."
 
+---
+
+## 3. Devpost / Hackathon Submission Fields & Additional Information
+
+### 1. Slogan / Hook (One-Liner)
+Code is your story. Let ShipStory tell it.
+
+### 2. Short Description (Max 255 Characters)
+ShipStory is an autonomous startup engine on Band. Its 6 agents parse git pushes, track competitor gaps, write copy, design graphics, and act as an interactive AI Assistant to manage your operations and community securely.
+
+### 3. Inspiration
+Lean startup teams, solo founders, and indie hackers build amazing tech but fail to gain traction because marketing, content creation, community engagement, and strategic roadmapping are massive manual bottlenecks. ShipStory was inspired by the vision of creating an autonomous virtual department that behaves like a real corporate team, continuously transforming raw engineering work into public traction and strategic alignment.
+
+### 4. What it does
+ShipStory is an autonomous 6-agent virtual growth department running inside a secure Band room.
+* **Devin (Lead Engineer)** parses technical code commits.
+* **Priscilla (Product & Compliance)** scores feature business value and audits copy drafts for IP leaks and brand alignment.
+* **Marshall (Research)** crawls competitor updates and user feedback.
+* **Gigi (Creative Copywriter)** generates multi-channel marketing campaigns (Twitter, Changelog, Newsletter).
+* **Vinci (Designer)** generates graphic asset prompts matching Gigi's copy.
+* **Connie (Chief of Staff & Assistant)** acts as a secure, interactive operational dashboard assistant for the user and handles public customer queries.
+
+### 5. How we built it
+* **Frontend**: Next.js 15 (App Router, TypeScript) styled with Vanilla CSS and Tailwind, using `@xyflow/react` (React Flow) for a live-updating interactive departmental visualizer map.
+* **Backend**: Python microservices orchestrated via the **Band SDK** (WebSockets and REST client) for real-time room communication and state synchronization.
+* **AI & Orchestration**: CrewAI Python SDK with `litellm` abstracting OpenAI, AI/ML API (GPT-4o), and Featherless (Llama 3.1 70B).
+* **State Management**: A local database (`company_brain_db.json`) coordinating active roadmaps, milestones, epic progress, and current session parameters.
+
+### 6. Challenges we ran into
+* **Infinite Loops & Credit Burn**: Agents got stuck in infinite conversation cycles on WebSockets during feedback debates. We solved this by implementing an in-memory message deduplication set and a state-based pipeline completion guard in the deterministic adapter.
+* **Lack of Context & Tool Hallucination**: CrewAI agents without tool access tried to query missing endpoints or output placeholder text. We resolved this by dynamically injecting the active Company Brain database state directly into the agent's prompt backstory inside the WebSocket message adapter, providing complete, real-time context.
+* **Compliance Safeguards**: Ensuring Connie's public-facing replies did not leak sensitive internal IP. We built Priscilla's compliance filter to intercept and audit drafts, redacting raw database code references before publication.
+
+### 7. Accomplishments that we're proud of
+* Building a real, multi-agent adversarial loop where agents critique, reject, and force revisions on marketing drafts (e.g. style guide constraints on Twitter emojis) until they are 100% compliant.
+* Successfully running distinct model providers (GPT-4o on AIML and Llama 3.1 70B on Featherless) in the same collaborative workspace using the Band framework.
+* Implementing a complete, self-improving product loop: competitor moves and user feedback feed Marshall's research, generating actionable recommendations that mutate the active roadmap in a single click.
+
+### 8. What we learned
+* State management and context serialization are critical when scaling multi-agent systems.
+* In-context state injection is often more robust, faster, and cheaper than granting agents arbitrary tool execution privileges.
+* Band's secure routing framework is invaluable for maintaining data isolation between customer-facing interfaces and internal development backends.
+
+### 9. What's next for ShipStory
+* **Autonomous Engineering Sync**: Connect Devin to code repositories to generate issues and draft pull requests solving human-approved strategic recommendations automatically.
+* **Live Social Outbound**: Hook up X, Discord, and Slack API integrations to post and reply autonomously.
+* **Automated Investor Sync**: Auto-update traction details and milestones directly in pitch deck files.

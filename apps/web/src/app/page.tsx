@@ -38,7 +38,8 @@ import {
   Settings,
   Compass,
   Cpu,
-  RefreshCw
+  RefreshCw,
+  Loader
 } from 'lucide-react';
 
 // Custom Node Component to render workflow agents, triggers, conditions, and outputs with high legibility
@@ -910,7 +911,7 @@ export default function Dashboard() {
   if (loading || !state) {
     return (
       <div className="flex flex-col justify-center items-center h-screen bg-[#F5F6F8] gap-4">
-        <Loader2 className="w-8 h-8 animate-spin text-blue-600" />
+        <Loader className="w-11 h-11 animate-spin text-blue-600" />
         <p className="font-mono text-sm text-gray-500">Connecting to ShipStory Platform...</p>
       </div>
     );
@@ -939,8 +940,9 @@ export default function Dashboard() {
         className="flex h-14 items-center justify-between border-b border-gray-200 bg-white shrink-0" 
         style={{ paddingLeft: '24px', paddingRight: '24px' }}
       >
-        <div className="flex items-center gap-3">
-          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-blue-600 text-white font-bold text-base">S</div>
+        <div className="flex items-center gap-2">
+          {/* <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-blue-600 text-white font-bold text-base">S</div> */}
+          <img src="/logo-nobg.png" alt="Logo" width={22} height={22}/>
           <div className="flex items-center gap-2">
             <span className="text-sm font-semibold tracking-tight text-gray-900">ShipStory /</span>
             <span 
@@ -1427,7 +1429,7 @@ export default function Dashboard() {
         {/* Right Sidebar Layout (Collapsible Connie Chief of Staff Chat & Node Inspector) */}
         <section 
           className={`flex flex-col bg-white transition-all duration-300 shrink-0 ${
-            isRightSidebarOpen ? 'w-[320px] border-l border-gray-200' : 'w-0 border-l-0 overflow-hidden'
+            isRightSidebarOpen ? 'w-[380px] border-l border-gray-200' : 'w-0 border-l-0 overflow-hidden'
           }`}
         >
           {isRightSidebarOpen && (
