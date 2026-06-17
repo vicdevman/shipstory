@@ -23,6 +23,43 @@ HANDLE_MAPPING = {
     "vinci_design": "vicdevman/vinci"
 }
 
+def parse_iso_datetime(dt_str: str) -> datetime:
+    """Parses an ISO 8601 string into a timezone-aware UTC datetime."""
+    from datetime import datetime, timezone
+    import re
+    
+    dt_str = dt_str.strip()
+    if dt_str.endswith("Z"):
+        dt_str = dt_str[:-1] + "+00:00"
+    
+    try:
+        dt = datetime.fromisoformat(dt_str)
+    except ValueError:
+        cleaned = dt_str.replace(" ", "T")
+        try:
+            dt = datetime.fromisoformat(cleaned)
+        except ValueError:
+            match = re.match(r"^(\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2})(?:\.(\d+))?([+-]\d{2}:?\d{2}|Z)?$", dt_str)
+            if match:
+                base, ms, tz = match.groups()
+                base = base.replace(" ", "T")
+                if ms:
+                    ms = (ms + "000000")[:6]
+                    base = f"{base}.{ms}"
+                if tz:
+                    if tz == "Z":
+                        tz = "+00:00"
+                    base = f"{base}{tz}"
+                dt = datetime.fromisoformat(base)
+            else:
+                raise
+                
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    else:
+        dt = dt.astimezone(timezone.utc)
+    return dt
+
 class DeterministicAgentAdapter(CrewAIAdapter):
     def __init__(self, agent_name: str, **kwargs):
         self.original_agent_name = agent_name
@@ -92,15 +129,15 @@ class DeterministicAgentAdapter(CrewAIAdapter):
             session = state.get("current_session", {})
             session_created_at_str = session.get("created_at")
             if session_created_at_str:
-                from datetime import datetime, timezone
-                session_time = datetime.fromisoformat(session_created_at_str.replace("Z", "+00:00"))
+                from datetime import timezone
+                session_time = parse_iso_datetime(session_created_at_str)
                 msg_time = msg.created_at
                 
                 # Make both timezone-aware
                 if msg_time.tzinfo is None:
                     msg_time = msg_time.replace(tzinfo=timezone.utc)
-                if session_time.tzinfo is None:
-                    session_time = session_time.replace(tzinfo=timezone.utc)
+                else:
+                    msg_time = msg_time.astimezone(timezone.utc)
                 
                 if msg_time < session_time:
                     logger.info(f"[{self.original_agent_name.upper()}] Skipping message from previous session. msg_time={msg_time}, session_time={session_time}")
@@ -353,7 +390,7 @@ Changed Files: {changed_files}
                     StateManager.update_approval_status(session_id, "APPROVED")
                     await tools.send_message(
                         "The marketing drafts are staged and fully approved by compliance.",
-                        ["@vicdevman/gigi"]
+                        ["@vicdevman"]
                     )
             else:
                 # Product scoring
