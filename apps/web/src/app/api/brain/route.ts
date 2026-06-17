@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { promises as fs, existsSync } from 'fs';
 import path from 'path';
+import { getMongoCollection, saveLocalFallback } from '@/lib/mongodb';
 
 const defaultState = {
   "company_metadata": {
@@ -138,6 +139,17 @@ async function readJsonFileWithRetry(filePath: string, retries = 3, delayMs = 50
 export async function GET() {
   try {
     const dbPath = getDbPath();
+    const collection = await getMongoCollection();
+    if (collection) {
+      const state = await collection.findOne({ _id: "nexus_labs_brain" });
+      if (state) {
+        cachedState = state; // Update cache on success
+        // Keep local JSON in sync
+        await saveLocalFallback(dbPath, state);
+        return NextResponse.json(state);
+      }
+    }
+
     const state = await readJsonFileWithRetry(dbPath);
     cachedState = state; // Update cache on success
     return NextResponse.json(state);

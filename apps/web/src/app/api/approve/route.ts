@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { promises as fs } from 'fs';
 import path from 'path';
+import { getMongoCollection, saveLocalFallback } from '@/lib/mongodb';
 
 function getDbPath() {
   const cwd = process.cwd();
@@ -32,12 +33,24 @@ export async function POST(request: Request) {
     }
 
     const dbPath = getDbPath();
-    let state: any;
-    try {
-      const data = await fs.readFile(dbPath, 'utf8');
-      state = JSON.parse(data);
-    } catch (err) {
-      return NextResponse.json({ error: 'Database file not initialized' }, { status: 500 });
+    let state: any = null;
+    const collection = await getMongoCollection();
+
+    if (collection) {
+      try {
+        state = await collection.findOne({ _id: "nexus_labs_brain" });
+      } catch (err) {
+        console.error('[Approve API] Error loading state from MongoDB:', err);
+      }
+    }
+
+    if (!state) {
+      try {
+        const data = await fs.readFile(dbPath, 'utf8');
+        state = JSON.parse(data);
+      } catch (err) {
+        return NextResponse.json({ error: 'Database file not initialized' }, { status: 500 });
+      }
     }
 
     if (action === 'approve_recommendation') {
@@ -63,7 +76,15 @@ export async function POST(request: Request) {
         state.operational_assets.active_milestones.push(rec.summary);
       }
 
-      await fs.writeFile(dbPath, JSON.stringify(state, null, 2), 'utf8');
+      if (collection) {
+        try {
+          state._id = "nexus_labs_brain";
+          await collection.replaceOne({ _id: "nexus_labs_brain" }, state, { upsert: true });
+        } catch (err) {
+          console.error('[Approve API] Error saving state to MongoDB:', err);
+        }
+      }
+      await saveLocalFallback(dbPath, state);
       return NextResponse.json({ success: true, message: 'Recommendation approved and milestone added.', state });
     }
 
@@ -74,7 +95,15 @@ export async function POST(request: Request) {
 
       state.current_session.agent_outputs.approval_status = 'SHIPPED';
 
-      await fs.writeFile(dbPath, JSON.stringify(state, null, 2), 'utf8');
+      if (collection) {
+        try {
+          state._id = "nexus_labs_brain";
+          await collection.replaceOne({ _id: "nexus_labs_brain" }, state, { upsert: true });
+        } catch (err) {
+          console.error('[Approve API] Error saving state to MongoDB:', err);
+        }
+      }
+      await saveLocalFallback(dbPath, state);
       return NextResponse.json({ success: true, message: 'Campaign shipped and status updated.', state });
     }
 

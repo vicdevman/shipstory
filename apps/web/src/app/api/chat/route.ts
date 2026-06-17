@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { promises as fs } from 'fs';
 import path from 'path';
+import { getMongoCollection, saveLocalFallback } from '@/lib/mongodb';
 
 function getDbPath() {
   const cwd = process.cwd();
@@ -30,12 +31,24 @@ export async function POST(request: Request) {
     }
 
     const dbPath = getDbPath();
-    let state: any;
-    try {
-      const data = await fs.readFile(dbPath, 'utf8');
-      state = JSON.parse(data);
-    } catch (err) {
-      return NextResponse.json({ error: 'Database file not initialized' }, { status: 500 });
+    let state: any = null;
+    const collection = await getMongoCollection();
+
+    if (collection) {
+      try {
+        state = await collection.findOne({ _id: "nexus_labs_brain" });
+      } catch (err) {
+        console.error('[Chat API] Error loading state from MongoDB:', err);
+      }
+    }
+
+    if (!state) {
+      try {
+        const data = await fs.readFile(dbPath, 'utf8');
+        state = JSON.parse(data);
+      } catch (err) {
+        return NextResponse.json({ error: 'Database file not initialized' }, { status: 500 });
+      }
     }
 
     // Initialize chat history if not exists
@@ -51,6 +64,16 @@ export async function POST(request: Request) {
     }
 
     // Check if room_id is set
+    if (!state.room_id) {
+      try {
+        const localData = await fs.readFile(dbPath, 'utf8');
+        const localState = JSON.parse(localData);
+        if (localState.room_id) {
+          state.room_id = localState.room_id;
+        }
+      } catch (e) {}
+    }
+
     if (!state.room_id) {
       return NextResponse.json(
         { error: 'No active Band room ID found. Please make sure the Connie agent process is running and connected first.' },
@@ -69,7 +92,15 @@ export async function POST(request: Request) {
     const initialLength = state.current_session.chat_history.length;
 
     // Save state back to DB with the user's message
-    await fs.writeFile(dbPath, JSON.stringify(state, null, 2), 'utf8');
+    if (collection) {
+      try {
+        state._id = "nexus_labs_brain";
+        await collection.replaceOne({ _id: "nexus_labs_brain" }, state, { upsert: true });
+      } catch (err) {
+        console.error('[Chat API] Error saving state to MongoDB:', err);
+      }
+    }
+    await saveLocalFallback(dbPath, state);
 
     // Spawn trigger_chat.py asynchronously
     const { exec } = require('child_process');
@@ -97,8 +128,15 @@ export async function POST(request: Request) {
       elapsed += pollInterval;
 
       try {
-        const fileContent = await fs.readFile(dbPath, 'utf8');
-        const updatedState = JSON.parse(fileContent);
+        let updatedState: any = null;
+        if (collection) {
+          updatedState = await collection.findOne({ _id: "nexus_labs_brain" });
+        }
+        if (!updatedState) {
+          const fileContent = await fs.readFile(dbPath, 'utf8');
+          updatedState = JSON.parse(fileContent);
+        }
+        
         const history = updatedState.current_session?.chat_history || [];
         
         // Find if there is a connie message appended after our user message
@@ -122,7 +160,16 @@ export async function POST(request: Request) {
         timestamp: new Date().toLocaleTimeString(),
       };
       state.current_session.chat_history.push(timeoutMsg);
-      await fs.writeFile(dbPath, JSON.stringify(state, null, 2), 'utf8');
+      
+      if (collection) {
+        try {
+          state._id = "nexus_labs_brain";
+          await collection.replaceOne({ _id: "nexus_labs_brain" }, state, { upsert: true });
+        } catch (err) {
+          console.error('[Chat API] Error saving timeout state to MongoDB:', err);
+        }
+      }
+      await saveLocalFallback(dbPath, state);
     }
 
     return NextResponse.json({ success: true, chat_history: state.current_session.chat_history });

@@ -6,7 +6,11 @@ readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
     "band-sdk[crewai]>=1.0.0",
+    "dnspython",
+    "pymongo",
     "python-dotenv>=1.2.2",
+    "litellm",
+    "tiktoken",
 ]
 
 [tool.uv]

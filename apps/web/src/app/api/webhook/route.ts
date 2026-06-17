@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { promises as fs, existsSync } from 'fs';
 import path from 'path';
+import { getMongoCollection, saveLocalFallback } from '@/lib/mongodb';
 
 function getDbPath() {
   const cwd = process.cwd();
@@ -27,16 +28,37 @@ export async function POST(request: Request) {
     const body = await request.json();
     const dbPath = getDbPath();
 
-    // Load current state
-    let state: any;
-    try {
-      const data = await fs.readFile(dbPath, 'utf8');
-      state = JSON.parse(data);
-    } catch (err) {
-      return NextResponse.json({ error: 'Database file not initialized or missing' }, { status: 500 });
+    // Load current state from MongoDB or fallback to file
+    let state: any = null;
+    const collection = await getMongoCollection();
+    if (collection) {
+      try {
+        state = await collection.findOne({ _id: "nexus_labs_brain" });
+      } catch (err) {
+        console.error('[Webhook API] Error loading state from MongoDB:', err);
+      }
     }
 
-    // Check if room_id is set. If not, wait/let frontend know.
+    if (!state) {
+      try {
+        const data = await fs.readFile(dbPath, 'utf8');
+        state = JSON.parse(data);
+      } catch (err) {
+        return NextResponse.json({ error: 'Database file not initialized or missing' }, { status: 500 });
+      }
+    }
+
+    // Check if room_id is set. If not, check if it exists in local file.
+    if (!state.room_id) {
+      try {
+        const localData = await fs.readFile(dbPath, 'utf8');
+        const localState = JSON.parse(localData);
+        if (localState.room_id) {
+          state.room_id = localState.room_id;
+        }
+      } catch (e) {}
+    }
+
     if (!state.room_id) {
       return NextResponse.json(
         { error: 'No active Band room ID found. Please start the agent processes first so they can connect and sync the room ID.' },
@@ -80,7 +102,15 @@ export async function POST(request: Request) {
     };
 
     // Save updated state
-    await fs.writeFile(dbPath, JSON.stringify(state, null, 2), 'utf8');
+    if (collection) {
+      try {
+        state._id = "nexus_labs_brain";
+        await collection.replaceOne({ _id: "nexus_labs_brain" }, state, { upsert: true });
+      } catch (err) {
+        console.error('[Webhook API] Error saving state to MongoDB:', err);
+      }
+    }
+    await saveLocalFallback(dbPath, state);
 
     // Spawn the trigger script asynchronously
     const { exec } = require('child_process');

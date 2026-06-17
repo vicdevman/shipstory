@@ -25,25 +25,95 @@ class StateManager:
             
         return agent_section.get("agent_id"), agent_section.get("api_key")
 
+    _mongo_collection = None
+    _mongo_initialized = False
+
+    @classmethod
+    def get_mongo_collection(cls):
+        """Initializes and returns the MongoDB collection if URI is configured."""
+        if cls._mongo_initialized:
+            return cls._mongo_collection
+
+        cls._mongo_initialized = True
+        uri = os.getenv("MONGDB_URI") or os.getenv("MONGODB_URI")
+        if not uri:
+            print("[StateManager] MongoDB URI environment variable not set. Using local JSON fallback.")
+            return None
+
+        try:
+            from pymongo import MongoClient
+            # Atlas SRV requires directConnection=False and generous timeouts
+            # for primary election during cluster startup
+            client = MongoClient(
+                uri,
+                serverSelectionTimeoutMS=30000,
+                connectTimeoutMS=30000,
+                socketTimeoutMS=30000,
+                directConnection=False,
+            )
+            client.admin.command('ping')
+            db = client["shipstory"]
+            cls._mongo_collection = db["company_brain"]
+            print("[StateManager] Connected to MongoDB Atlas successfully.")
+        except Exception as e:
+            print(f"[StateManager] Failed to connect to MongoDB: {e}. Falling back to local JSON.")
+            cls._mongo_collection = None
+
+        return cls._mongo_collection
+
+    @classmethod
+    def save_local_state(cls, state: dict) -> None:
+        """Helper to write state to the local JSON file."""
+        cls.DB_FILE.parent.mkdir(parents=True, exist_ok=True)
+        # Avoid serializing MongoDB objects (like ObjectId) just in case
+        serialized_state = json.loads(json.dumps(state, default=str))
+        with open(cls.DB_FILE, "w", encoding="utf-8") as file:
+            json.dump(serialized_state, file, indent=2)
+
     @classmethod
     def load_state(cls) -> dict:
-        """Loads the current Company Brain state from the JSON database file."""
+        """Loads the current Company Brain state from MongoDB (with local JSON fallback)."""
+        collection = cls.get_mongo_collection()
+        if collection is not None:
+            try:
+                state = collection.find_one({"_id": "nexus_labs_brain"})
+                if state:
+                    return state
+                else:
+                    print("[StateManager] nexus_labs_brain document not found in MongoDB. Initializing state...")
+                    state = cls.compile_dynamic_company_brain()
+                    state["_id"] = "nexus_labs_brain"
+                    collection.insert_one(state)
+                    cls.save_local_state(state)
+                    return state
+            except Exception as e:
+                print(f"[StateManager] Error reading from MongoDB: {e}. Falling back to local JSON.")
+
         if not cls.DB_FILE.exists():
-            # Fallback compile and persist if database file is missing
             state = cls.compile_dynamic_company_brain()
-            cls.save_state(state)
+            cls.save_local_state(state)
             return state
             
         with open(cls.DB_FILE, "r", encoding="utf-8") as file:
-            return json.load(file)
+            try:
+                return json.load(file)
+            except Exception as e:
+                print(f"[StateManager] Error reading local JSON file: {e}. Using compiled dynamic state.")
+                return cls.compile_dynamic_company_brain()
 
     @classmethod
     def save_state(cls, state: dict) -> None:
-        """Saves the Company Brain state back to the JSON database file."""
-        # Ensure parent directory exists
-        cls.DB_FILE.parent.mkdir(parents=True, exist_ok=True)
-        with open(cls.DB_FILE, "w", encoding="utf-8") as file:
-            json.dump(state, file, indent=2)
+        """Saves the Company Brain state back to MongoDB and synchronizes the local JSON file."""
+        state["_id"] = "nexus_labs_brain"
+        
+        collection = cls.get_mongo_collection()
+        if collection is not None:
+            try:
+                collection.replace_one({"_id": "nexus_labs_brain"}, state, upsert=True)
+            except Exception as e:
+                print(f"[StateManager] Error saving to MongoDB: {e}.")
+
+        cls.save_local_state(state)
 
     @classmethod
     def update_agent_output(cls, session_id: str, agent_key: str, output_data: any) -> None:
@@ -121,13 +191,50 @@ class StateManager:
         if (template_dir / "pitch_deck_raw.txt").exists():
             pitch_data = (template_dir / "pitch_deck_raw.txt").read_text()
 
-        # Build our dynamic multi-agent context state canvas
+        # Extract structured fields from raw text assets where possible
+        _name = "Nexus Labs"
+        _value_prop = "Local-first, AI-powered knowledge management tool with sub-10ms peer-to-peer sync."
+        _target_persona = "Developers, technical founders, power note-takers"
+        _pitch_summary = str(pitch_data)[:300] if pitch_data else "N/A"
+
+        # Parse milestones from milestone_data JSON
+        _active_milestones = []
+        _epic_progress = {}
+        if isinstance(milestone_data, dict):
+            target = milestone_data.get("active_milestone_target", "")
+            if target:
+                _active_milestones = [target]
+            _epic_progress = milestone_data.get("epic_progress_percentages", {})
+
+        # Build state with schema keys that match both the Next.js frontend
+        # (page.tsx reads: name, value_proposition, target_persona, style_guide,
+        #  pitch_deck_summary, active_milestones, epic_progress_percentages)
+        # and the deterministic_adapter.py agent context injector.
         return {
             "company_metadata": {
+                "name": _name,
+                "value_proposition": _value_prop,
+                "target_persona": _target_persona,
+                "style_guide": {
+                    "tone": "Minimalist, professional, developer-focused",
+                    "restrictions": [
+                        "Max 2 emojis per post",
+                        "Avoid marketing jargon like 'revolutionizing'"
+                    ]
+                },
+                "security_filters": {
+                    "restricted_keywords": ["auth_key", "password", "vulnerability", "leak_test", "private_beta_v1"],
+                    "allow_public_roadmap": False
+                },
+                # Keep raw assets for agent backstory injection
                 "raw_brand_voice_constraints": brand_data,
                 "security_clearance_level": "RESTRICTED"
             },
             "operational_assets": {
+                "pitch_deck_summary": _pitch_summary,
+                "active_milestones": _active_milestones,
+                "epic_progress_percentages": _epic_progress,
+                # Keep raw assets for agent context
                 "active_prd_epics": prd_data,
                 "milestone_tracking": milestone_data,
                 "investor_pitch_deck_baseline": pitch_data

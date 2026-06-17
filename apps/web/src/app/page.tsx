@@ -39,7 +39,8 @@ import {
   Compass,
   Cpu,
   RefreshCw,
-  Loader
+  Loader,
+  ArrowUp
 } from 'lucide-react';
 
 // Custom Node Component to render workflow agents, triggers, conditions, and outputs with high legibility
@@ -911,7 +912,7 @@ export default function Dashboard() {
   if (loading || !state) {
     return (
       <div className="flex flex-col justify-center items-center h-screen bg-[#F5F6F8] gap-4">
-        <Loader className="w-11 h-11 animate-spin text-blue-600" />
+        <Loader className="w-8 h-8 animate-spin text-blue-600" />
         <p className="font-mono text-sm text-gray-500">Connecting to ShipStory Platform...</p>
       </div>
     );
@@ -1439,7 +1440,7 @@ export default function Dashboard() {
                 <div className="flex gap-1 bg-gray-50 p-1 rounded-lg">
                   <button
                     onClick={() => setRightSidebarTab('chat')}
-                    className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[11px] font-bold font-mono transition-all duration-150 cursor-pointer ${
+                    className={`flex items-center gap-1.5 px-2.5 py-1 rounded-sm text-[11px] font-bold font-mono transition-all duration-150 cursor-pointer ${
                       rightSidebarTab === 'chat'
                         ? 'bg-white text-purple-700 shadow-sm'
                         : 'text-gray-500 hover:text-gray-800'
@@ -1450,7 +1451,7 @@ export default function Dashboard() {
                   </button>
                   <button
                     onClick={() => setRightSidebarTab('inspector')}
-                    className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[11px] font-bold font-mono transition-all duration-150 cursor-pointer ${
+                    className={`flex items-center gap-1.5 px-2.5 py-1 rounded-sm text-[11px] font-bold font-mono transition-all duration-150 cursor-pointer ${
                       rightSidebarTab === 'inspector'
                         ? 'bg-white text-blue-700 shadow-sm'
                         : 'text-gray-500 hover:text-gray-800'
@@ -1527,9 +1528,9 @@ export default function Dashboard() {
                       className="bg-blue-600 hover:bg-blue-700 disabled:bg-gray-100 text-white disabled:text-gray-400 rounded-lg flex items-center justify-center shrink-0 w-9 h-9 transition-colors cursor-pointer"
                     >
                       {sendingChat ? (
-                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                        <Loader2 className="w-4.5 h-4.5 animate-spin" />
                       ) : (
-                        <Send className="w-3.5 h-3.5 fill-current" />
+                        <ArrowUp className="w-4.5 h-4.5 " />
                       )}
                     </button>
                   </form>
