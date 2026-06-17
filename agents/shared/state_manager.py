@@ -7,6 +7,8 @@ from pathlib import Path
 class StateManager:
     """Orchestrates loading configuration files and compiling dynamic Company Brain structures from markdown assets."""
     
+    DB_FILE = Path(__file__).resolve().parent / "company_brain_db.json"
+    
     @staticmethod
     def load_configuration(agent_key: str) -> tuple[str, str]:
         """Reads agent_config.yaml and returns a tuple of (agent_id, api_key)."""
@@ -22,6 +24,78 @@ class StateManager:
             raise KeyError(f"Configuration block '{agent_key}' missing from agent_config.yaml")
             
         return agent_section.get("agent_id"), agent_section.get("api_key")
+
+    @classmethod
+    def load_state(cls) -> dict:
+        """Loads the current Company Brain state from the JSON database file."""
+        if not cls.DB_FILE.exists():
+            # Fallback compile and persist if database file is missing
+            state = cls.compile_dynamic_company_brain()
+            cls.save_state(state)
+            return state
+            
+        with open(cls.DB_FILE, "r", encoding="utf-8") as file:
+            return json.load(file)
+
+    @classmethod
+    def save_state(cls, state: dict) -> None:
+        """Saves the Company Brain state back to the JSON database file."""
+        # Ensure parent directory exists
+        cls.DB_FILE.parent.mkdir(parents=True, exist_ok=True)
+        with open(cls.DB_FILE, "w", encoding="utf-8") as file:
+            json.dump(state, file, indent=2)
+
+    @classmethod
+    def update_agent_output(cls, session_id: str, agent_key: str, output_data: any) -> None:
+        """Updates a specific agent's output in the current session state."""
+        state = cls.load_state()
+        state["current_session"]["session_id"] = session_id
+        state["current_session"]["agent_outputs"][agent_key] = output_data
+        cls.save_state(state)
+
+    @classmethod
+    def add_rejection_memo(cls, session_id: str, rejection_data: dict) -> None:
+        """Appends a rejection critique memo to the current session state."""
+        state = cls.load_state()
+        state["current_session"]["session_id"] = session_id
+        if "rejections_and_memos" not in state["current_session"]:
+            state["current_session"]["rejections_and_memos"] = []
+        state["current_session"]["rejections_and_memos"].append(rejection_data)
+        cls.save_state(state)
+
+    @classmethod
+    def update_approval_status(cls, session_id: str, status: str) -> None:
+        """Updates the session approval status."""
+        state = cls.load_state()
+        state["current_session"]["session_id"] = session_id
+        state["current_session"]["agent_outputs"]["approval_status"] = status
+        cls.save_state(state)
+
+    @classmethod
+    def initialize_new_session(cls, session_id: str, trigger_source: str, raw_inputs: dict) -> dict:
+        """Initializes a brand new session with default empty states in the database."""
+        from datetime import datetime, timezone
+        state = cls.load_state()
+        state["current_session"] = {
+            "session_id": session_id,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "trigger_source": trigger_source,
+            "status": "PROCESSING",
+            "raw_inputs": raw_inputs,
+            "agent_outputs": {
+                "devin_technical_summary": None,
+                "priscilla_importance_score": None,
+                "gigi_content_drafts": {
+                  "twitter": None,
+                  "changelog": None,
+                  "newsletter": None
+                },
+                "approval_status": "PENDING"
+            },
+            "rejections_and_memos": []
+        }
+        cls.save_state(state)
+        return state
 
     @staticmethod
     def compile_dynamic_company_brain() -> dict:

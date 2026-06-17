@@ -5,7 +5,7 @@ import os
 from dotenv import load_dotenv
 from shared.state_manager import StateManager
 from band import Agent, AdapterFeatures, Emit
-from band.adapters import CrewAIAdapter
+from shared.deterministic_adapter import DeterministicAgentAdapter
 
 # Initialize clean logging outputs
 logging.basicConfig(level=logging.INFO)
@@ -24,8 +24,8 @@ async def main():
         return
 
     # 2. Configure the Model Adapter Layer (using our OpenAI-compatible Hackathon endpoints)
-    adapter = CrewAIAdapter(
-        model="gpt-4o", # Handled via OpenAI format layer
+    adapter = DeterministicAgentAdapter(
+        agent_name="vinci_design",
         role="Art Director",
         goal="Extract metaphors from approved copy and generate clean, professional schematic graphic prompts or SVGs that align with the brand’s minimalist styling.",
         backstory="""You are an Art Director with a strong eye for minimalist and professional visual designs. You translate marketing concepts into clean, schematic illustrations and precise design prompts, avoiding cheesy or generic imagery.""",

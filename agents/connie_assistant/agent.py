@@ -5,7 +5,7 @@ import os
 from dotenv import load_dotenv
 from shared.state_manager import StateManager
 from band import Agent, AdapterFeatures, Emit
-from band.adapters import CrewAIAdapter
+from shared.deterministic_adapter import DeterministicAgentAdapter
 
 # Initialize clean logging outputs
 logging.basicConfig(level=logging.INFO)
@@ -24,8 +24,8 @@ async def main():
         return
 
     # 2. Configure the Model Adapter Layer (using our OpenAI-compatible Hackathon endpoints)
-    adapter = CrewAIAdapter(
-        model="gpt-4o", # Handled via OpenAI format layer
+    adapter = DeterministicAgentAdapter(
+        agent_name="connie_assistant",
         role="Dual-Facing Operations Assistant",
         goal="Provide internal operations assistance, answer customer Q&As, and manage sanitized public channel communications.",
         backstory="""You are a highly capable Chief of Staff. You interact with developers internally to report system progress, and communicate with external users to answer product questions, always routing public replies through security compliance first.""",

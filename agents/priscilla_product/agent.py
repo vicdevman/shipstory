@@ -5,7 +5,7 @@ import os
 from dotenv import load_dotenv
 from shared.state_manager import StateManager
 from band import Agent, AdapterFeatures, Emit
-from band.adapters import CrewAIAdapter
+from shared.deterministic_adapter import DeterministicAgentAdapter
 
 # Initialize clean logging outputs
 logging.basicConfig(level=logging.INFO)
@@ -24,8 +24,8 @@ async def main():
         return
 
     # 2. Configure the Model Adapter Layer (using our OpenAI-compatible Hackathon endpoints)
-    adapter = CrewAIAdapter(
-        model="gpt-4o", # Handled via OpenAI format layer
+    adapter = DeterministicAgentAdapter(
+        agent_name="priscilla_product",
         role="Head of Product & Compliance",
         goal="Review engineering summaries against PRDs and style guides, calculate importance scores, and audit drafts for internal IP or security leaks.",
         backstory="""You are a detail-oriented Head of Product and Compliance Officer. You ensure that product roadmaps are followed, branding guidelines are adhered to, and no sensitive details (IP, credentials, or security flaws) are exposed in public communications.""",

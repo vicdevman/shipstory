@@ -5,7 +5,7 @@ import os
 from dotenv import load_dotenv
 from shared.state_manager import StateManager
 from band import Agent, AdapterFeatures, Emit
-from band.adapters import CrewAIAdapter
+from shared.deterministic_adapter import DeterministicAgentAdapter
 
 # Initialize clean logging outputs
 logging.basicConfig(level=logging.INFO)
@@ -24,8 +24,8 @@ async def main():
         return
 
     # 2. Configure the Model Adapter Layer (using our OpenAI-compatible Hackathon endpoints)
-    adapter = CrewAIAdapter(
-        model="gpt-4o", # Handled via OpenAI format layer
+    adapter = DeterministicAgentAdapter(
+        agent_name="gigi_marketing",
         role="Creative Copywriter",
         goal="Translate technical summaries and competitor context into high-performing, clean marketing copy for multiple media channels.",
         backstory="""You are a creative copywriter specializing in developer-focused tools. You craft engaging, clear, and high-impact social media posts, changelogs, and newsletters, always adhering to the brand's minimalist and professional style guidelines.""",
