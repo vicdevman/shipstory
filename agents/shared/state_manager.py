@@ -27,11 +27,26 @@ class StateManager:
 
     _mongo_collection = None
     _mongo_initialized = False
+    _mongo_client = None
 
     @classmethod
     def get_mongo_collection(cls):
-        """Initializes and returns the MongoDB collection if URI is configured."""
+        """Initializes and returns the MongoDB collection if URI is configured.
+        Retries the connection if the previous attempt failed or client has gone stale.
+        """
+        # If we have a live collection already, do a quick health check
+        if cls._mongo_initialized and cls._mongo_collection is not None:
+            try:
+                cls._mongo_client.admin.command('ping')
+                return cls._mongo_collection
+            except Exception:
+                # Connection went stale — reset so we reconnect
+                cls._mongo_initialized = False
+                cls._mongo_collection = None
+                cls._mongo_client = None
+
         if cls._mongo_initialized:
+            # Previously attempted and confirmed no URI — skip
             return cls._mongo_collection
 
         cls._mongo_initialized = True
@@ -42,22 +57,30 @@ class StateManager:
 
         try:
             from pymongo import MongoClient
-            # Atlas SRV requires directConnection=False and generous timeouts
-            # for primary election during cluster startup
             client = MongoClient(
                 uri,
-                serverSelectionTimeoutMS=30000,
-                connectTimeoutMS=30000,
+                serverSelectionTimeoutMS=15000,
+                connectTimeoutMS=15000,
                 socketTimeoutMS=30000,
                 directConnection=False,
+                retryWrites=True,
+                retryReads=True,
+                # Limit pool size per process to avoid overwhelming Atlas free tier
+                maxPoolSize=3,
+                minPoolSize=1,
+                maxIdleTimeMS=45000,
             )
             client.admin.command('ping')
             db = client["shipstory"]
+            cls._mongo_client = client
             cls._mongo_collection = db["company_brain"]
             print("[StateManager] Connected to MongoDB Atlas successfully.")
         except Exception as e:
             print(f"[StateManager] Failed to connect to MongoDB: {e}. Falling back to local JSON.")
             cls._mongo_collection = None
+            cls._mongo_client = None
+            # Reset so next call can retry
+            cls._mongo_initialized = False
 
         return cls._mongo_collection
 

@@ -318,6 +318,21 @@ const initialNodes: any[] = [
     }
   },
   {
+    id: 'marshall',
+    type: 'custom',
+    position: { x: 420, y: 215 },
+    data: {
+      type: 'agent',
+      label: 'Marshall Research',
+      role: 'VP of Growth & Intelligence',
+      status: 'disabled',
+      collapsed: false,
+      fields: [
+        { label: 'Strategic Pivot', value: 'Awaiting session start...' }
+      ]
+    }
+  },
+  {
     id: 'priscilla',
     type: 'custom',
     position: { x: 420, y: 380 },
@@ -359,6 +374,21 @@ const initialNodes: any[] = [
       collapsed: false,
       fields: [
         { label: 'Audit Result', value: 'No staged copy drafts submitted' }
+      ]
+    }
+  },
+  {
+    id: 'vinci',
+    type: 'custom',
+    position: { x: 990, y: 215 },
+    data: {
+      type: 'agent',
+      label: 'Vinci Design',
+      role: 'Art Director',
+      status: 'disabled',
+      collapsed: false,
+      fields: [
+        { label: 'Design Prompt', value: 'Waiting for approved copy...' }
       ]
     }
   },
@@ -405,8 +435,24 @@ const initialEdges: any[] = [
     style: { stroke: '#93C5FD', strokeWidth: 3.5 }
   },
   {
+    id: 'e-trigger-marshall',
+    source: 'trigger',
+    target: 'marshall',
+    type: 'default',
+    markerEnd: { type: MarkerType.ArrowClosed, color: '#93C5FD' },
+    style: { stroke: '#93C5FD', strokeWidth: 3.5 }
+  },
+  {
     id: 'e-trigger-priscilla',
     source: 'trigger',
+    target: 'priscilla',
+    type: 'default',
+    markerEnd: { type: MarkerType.ArrowClosed, color: '#93C5FD' },
+    style: { stroke: '#93C5FD', strokeWidth: 3.5 }
+  },
+  {
+    id: 'e-marshall-priscilla',
+    source: 'marshall',
     target: 'priscilla',
     type: 'default',
     markerEnd: { type: MarkerType.ArrowClosed, color: '#93C5FD' },
@@ -444,6 +490,22 @@ const initialEdges: any[] = [
     targetHandle: 'rejection-target',
     type: 'default',
     style: { stroke: '#EF4444', strokeWidth: 3.5, strokeDasharray: '4 4' }
+  },
+  {
+    id: 'e-compliance-vinci',
+    source: 'compliance',
+    target: 'vinci',
+    type: 'default',
+    markerEnd: { type: MarkerType.ArrowClosed, color: '#93C5FD' },
+    style: { stroke: '#93C5FD', strokeWidth: 3.5 }
+  },
+  {
+    id: 'e-vinci-ship',
+    source: 'vinci',
+    target: 'ship_deck',
+    type: 'default',
+    markerEnd: { type: MarkerType.ArrowClosed, color: '#93C5FD' },
+    style: { stroke: '#93C5FD', strokeWidth: 3.5 }
   },
   {
     id: 'e-compliance-ship',
@@ -679,6 +741,41 @@ export default function Dashboard() {
           ];
         }
 
+        // 5a. Marshall Research Node
+        else if (node.id === 'marshall') {
+          const recs = state.evolutionary_feedback_loop?.active_recommendations || [];
+          const hasRecs = recs.length > 0;
+          if (status === 'PROCESSING') {
+            nodeStatus = hasRecs ? 'success' : 'running';
+          } else if (hasRecs) {
+            nodeStatus = 'success';
+          }
+          const latestRec = recs[recs.length - 1];
+          fields = [
+            { 
+              label: 'Strategic Pivot', 
+              value: latestRec 
+                ? `[${latestRec.type}] ${latestRec.summary}\nRationale: ${latestRec.rationale}\nImpact Score: ${latestRec.strategic_impact_score}/10` 
+                : (nodeStatus === 'running' ? 'Scanning competitor pricing & gaps...' : 'Awaiting session start...')
+            }
+          ];
+        }
+
+        // 5b. Vinci Design Node
+        else if (node.id === 'vinci') {
+          if (outputs.vinci_image_prompt) {
+            nodeStatus = 'success';
+          } else if (outputs.approval_status === 'APPROVED') {
+            nodeStatus = 'running';
+          } else {
+            nodeStatus = 'disabled';
+          }
+          fields = [
+            { label: 'Design Prompt', value: outputs.vinci_image_prompt || (nodeStatus === 'running' ? 'Generating visual concept...' : 'Awaiting compliance approval...') },
+            { label: 'Asset URL', value: outputs.vinci_image_url || '' }
+          ];
+        }
+
         // 6. Connie Node
         else if (node.id === 'connie') {
           if (status === 'PROCESSING') {
@@ -755,9 +852,15 @@ export default function Dashboard() {
         let strokeColor = '#93C5FD'; // blue-300 default
 
         if (status === 'PROCESSING') {
-          if (edge.id === 'e-trigger-devin' || edge.id === 'e-trigger-priscilla') {
+          if (edge.id === 'e-trigger-devin' || edge.id === 'e-trigger-priscilla' || edge.id === 'e-trigger-marshall') {
             isAnimated = true;
-            strokeColor = '#3B82F6';
+            strokeColor = edge.id === 'e-trigger-marshall' ? '#06B6D4' : '#3B82F6';
+          }
+          if (edge.id === 'e-marshall-priscilla') {
+            const recs = state.evolutionary_feedback_loop?.active_recommendations || [];
+            const hasRecs = recs.length > 0;
+            isAnimated = hasRecs && !outputs.priscilla_importance_score;
+            strokeColor = isAnimated ? '#06B6D4' : (hasRecs ? '#22C55E' : '#93C5FD');
           }
           if (edge.id === 'e-devin-gigi') {
             isAnimated = outputs.devin_technical_summary && !outputs.gigi_content_drafts?.twitter;
@@ -776,7 +879,15 @@ export default function Dashboard() {
             isAnimated = lastRejection && outputs.approval_status === 'PENDING' && !outputs.gigi_content_drafts?.twitter;
             strokeColor = isAnimated ? '#EF4444' : '#FCA5A5';
           }
-          if (edge.id === 'e-compliance-connie') {
+          if (edge.id === 'e-compliance-vinci') {
+            isAnimated = outputs.approval_status === 'APPROVED' && !outputs.vinci_image_prompt;
+            strokeColor = isAnimated ? '#EC4899' : (outputs.approval_status === 'APPROVED' || outputs.approval_status === 'SHIPPED' ? '#22C55E' : '#93C5FD');
+          }
+          if (edge.id === 'e-vinci-ship') {
+            isAnimated = !!outputs.vinci_image_prompt && outputs.approval_status === 'APPROVED';
+            strokeColor = isAnimated ? '#EC4899' : (outputs.approval_status === 'SHIPPED' ? '#22C55E' : '#93C5FD');
+          }
+          if (edge.id === 'e-compliance-connie' || edge.id === 'e-compliance-ship') {
             isAnimated = outputs.approval_status === 'APPROVED';
             strokeColor = isAnimated ? '#22C55E' : '#93C5FD';
           }
@@ -1091,6 +1202,45 @@ export default function Dashboard() {
                 )}
               </div>
 
+              {/* COMPETITOR FEED Section */}
+              <div className="flex flex-col gap-1">
+                <div 
+                  onClick={() => toggleSection('competitorFeed')}
+                  className="flex items-center justify-between py-1.5 px-2 rounded cursor-pointer hover:bg-[#1A1A1E] text-gray-500 hover:text-gray-300"
+                >
+                  <span className="text-[10px] font-bold tracking-wider uppercase font-mono text-cyan-500">Competitor Scan Feed</span>
+                  {openSidebarSections.competitorFeed !== false ? <ChevronDown className="w-3.5 h-3.5 text-cyan-500" /> : <ChevronRight className="w-3.5 h-3.5 text-cyan-500" />}
+                </div>
+
+                {openSidebarSections.competitorFeed !== false && (
+                  <div className="flex flex-col gap-2 mt-2">
+                    {feedback.active_recommendations?.length > 0 ? (
+                      feedback.active_recommendations.slice(-3).reverse().map((rec: any, idx: number) => (
+                        <div 
+                          key={rec.recommendation_id || idx}
+                          className="bg-[#111113] border border-[#1e1e24] rounded-lg flex flex-col gap-1.5 p-3 hover:border-cyan-500/30 hover:bg-[#151518] font-mono transition-all duration-200"
+                        >
+                          <div className="flex justify-between items-center">
+                            <span className="text-[8px] font-bold uppercase tracking-wider text-cyan-400 bg-cyan-950 px-1 py-0.5 rounded">
+                              {rec.type || 'SCAN'}
+                            </span>
+                            <span className="text-[9px] text-gray-400 font-bold">
+                              Impact: {rec.strategic_impact_score}/10
+                            </span>
+                          </div>
+                          <h4 className="text-[11px] font-bold text-gray-200 leading-snug">{rec.summary}</h4>
+                          <p className="text-[9px] text-gray-400 leading-relaxed line-clamp-3">{rec.rationale}</p>
+                        </div>
+                      ))
+                    ) : (
+                      <div className="text-[10px] text-gray-500 font-mono italic p-2 bg-[#111113] border border-[#1e1e24] rounded-lg">
+                        No competitor intelligence scan data found.
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
             </div>
           ) : (
             // Collapsed rail display
@@ -1344,6 +1494,58 @@ export default function Dashboard() {
                   </div>
                 )}
               </div>
+
+              {/* Vinci Graphic Asset Campaign Design */}
+              {outputs.gigi_content_drafts && outputs.gigi_content_drafts.twitter && (
+                <div className="bg-white border border-gray-200 rounded-xl p-5" style={{ padding: '20px' }}>
+                  <span className="text-[10px] uppercase font-bold text-pink-600 font-mono tracking-widest">Vinci Graphic Asset Campaign Design</span>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-5 mt-3">
+                    <div className="flex flex-col justify-between p-4 bg-gray-50 border border-gray-100 rounded-lg font-mono">
+                      <div>
+                        <span className="text-[9px] uppercase font-bold text-gray-400">Vinci Design Prompt</span>
+                        <p className="text-xs font-semibold text-gray-800 mt-2 leading-relaxed italic">
+                          {outputs.vinci_image_prompt 
+                            ? `"${outputs.vinci_image_prompt}"` 
+                            : "Awaiting visual prompt generation..."}
+                        </p>
+                      </div>
+                      <div className="mt-4">
+                        <span className="text-[9px] uppercase font-bold text-gray-400">Asset Storage ID</span>
+                        <p className="text-[10px] text-gray-500 mt-1">
+                          {outputs.vinci_image_url ? `Cloudinary Ref: ${outputs.vinci_image_url.split('/').pop()}` : "N/A"}
+                        </p>
+                      </div>
+                    </div>
+                    
+                    <div className="bg-[#0f172a] border border-[#1e293b] rounded-lg overflow-hidden flex items-center justify-center relative min-h-[200px]">
+                      {outputs.vinci_image_url ? (
+                        <img 
+                          src={outputs.vinci_image_url} 
+                          alt="Vinci Generated Graphic Asset" 
+                          className="w-full h-full object-cover max-h-[300px]"
+                        />
+                      ) : (
+                        <div className="flex flex-col items-center justify-center p-6 text-center text-slate-400">
+                          <div className="w-16 h-16 rounded-full bg-slate-800 flex items-center justify-center mb-3 animate-pulse border border-slate-700">
+                            <Sparkles className="w-6 h-6 text-indigo-400" />
+                          </div>
+                          <span className="text-xs font-bold font-mono text-slate-200">Interactive Design Blueprint Placeholder</span>
+                          <p className="text-[10px] font-mono text-slate-500 max-w-[280px] mt-1.5 leading-relaxed">
+                            {outputs.vinci_image_prompt 
+                              ? "Vinci prompt generated! Simulating image rendering. Approved campaign graphics will automatically synchronize here."
+                              : "Vinci has not generated a prompt yet. Generate and approve Gigi's copy drafts to trigger Vinci's creative design cycle."}
+                          </p>
+                          <div className="flex items-center gap-6 mt-4 opacity-40">
+                            <div className="w-8 h-8 rounded-full border border-dashed border-indigo-400 flex items-center justify-center text-[10px] font-mono text-indigo-400">Node A</div>
+                            <div className="w-16 border-t-2 border-dashed border-indigo-400 animate-pulse"></div>
+                            <div className="w-8 h-8 rounded-full border border-dashed border-indigo-400 flex items-center justify-center text-[10px] font-mono text-indigo-400">Node B</div>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              )}
 
               {/* Delivery Actions & Recommendations */}
               <div className="grid grid-cols-1 md:grid-cols-3 gap-5">

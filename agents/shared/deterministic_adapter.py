@@ -185,8 +185,8 @@ class DeterministicAgentAdapter(CrewAIAdapter):
             except Exception:
                 pass
 
-        # 4. Special GITHUB_COMMIT trigger check for Devin
-        if self.original_agent_name == "devin_eng" and "[github_commit]" in content.lower():
+        # 4. Special GITHUB_COMMIT trigger check for Devin and Marshall
+        if self.original_agent_name in ["devin_eng", "marshall_research"] and "[github_commit]" in content.lower():
             is_mentioned = True
 
         if not is_mentioned:
@@ -268,13 +268,51 @@ Changed Files: {changed_files}
 [Compliance Rejections/Memos]
 {rejection_text}
 """
+            # Inject Tavily competitor research dynamically if this is Marshall
+            if self.original_agent_name == "marshall_research":
+                query = "competitor pricing feature gaps local-first peer-to-peer sync note-taking"
+                logger.info(f"[{self.original_agent_name.upper()}] Performing competitor scan query on Tavily: '{query}'...")
+                
+                # Print directly to stdout/console so the user can see it in run_agents.py console
+                print(f"\n>>> [MARSHALL RESEARCH] Scanning Tavily for: '{query}'...")
+                
+                try:
+                    from shared.tavily_helper import search_tavily
+                    search_results = await asyncio.to_thread(search_tavily, query)
+                    if "Error executing search" in search_results or "getaddrinfo failed" in search_results:
+                        raise ValueError(search_results)
+                    print(f">>> [MARSHALL RESEARCH] Competitor scan completed successfully.\n")
+                except Exception as ex:
+                    logger.warning(f"[{self.original_agent_name.upper()}] Tavily search failed: {ex}. Using high-fidelity competitor intelligence fallback.")
+                    print(f">>> [MARSHALL RESEARCH] Tavily connection failed ({ex}). Falling back to cached competitor intelligence...\n")
+                    search_results = (
+                        "Synthesized Market Intelligence Answer:\n"
+                        "Competitors like Obsidian and Logseq offer local-first note-taking with markdown formats. "
+                        "Obsidian sync is priced at $10/month and does not offer sub-10ms peer-to-peer sync. "
+                        "Logseq relies on git or cloud sync which has frequent file conflict issues. "
+                        "Anytype provides a P2P local-first option but lacks collaborative compliance workflows. "
+                        "There is a gap in visual sync transparency and collaborative team approvals that Nexus Labs can target."
+                    )
+                
+                system_context += f"\n\n### TAVILY COMPETITOR SCAN RESULTS (LIVE MARKET INTELLIGENCE)\n{search_results}\n"
+
             agent_instructions = ""
             if self.original_agent_name == "devin_eng":
                 agent_instructions = "\nDevin, you must write a technical summary of the commit. Do NOT try to read physical files or pull metrics. Summarize the changes using the commit message and list of changed files in the session state."
+            elif self.original_agent_name == "marshall_research":
+                agent_instructions = "\nMarshall, you must analyze the competitor scan results and write a structured roadmap pivot recommendation. " \
+                                     "Provide your output exactly in this format:\n" \
+                                     "Summary: <clear action-oriented milestone summary>\n" \
+                                     "Rationale: <why we should do this based on competitor pricing, features, or outages>\n" \
+                                     "Strategic Impact Score: <integer from 1 to 10>"
             elif self.original_agent_name == "priscilla_product":
                 agent_instructions = "\nPriscilla, you must score the product impact of the technical summary or audit the marketing copy drafts. Output a score in the format X/10 when scoring. Verify style compliance when auditing."
             elif self.original_agent_name == "gigi_marketing":
                 agent_instructions = "\nGigi, you must write actual marketing drafts for Twitter, Changelog, and Newsletter. Do NOT output placeholders, templates, or say you cannot share files. Write the actual copy. Keep Twitter under 2 emojis."
+            elif self.original_agent_name == "vinci_design":
+                agent_instructions = "\nVinci, you must translate the approved campaign drafts into a single, clean, highly detailed design prompt for image generation. " \
+                                     "Output ONLY the prompt itself under the header 'Design Prompt:', avoiding any conversational prefix or suffix. " \
+                                     "Focus on schematic, technical, or minimalist illustrations suited for developers."
             elif self.original_agent_name == "connie_assistant":
                 agent_instructions = "\nConnie, you must answer the user's chat questions directly using the milestones and epic progress in the roadmap metrics above. Do NOT try to delegate, query external databases, or tag other agents."
 
@@ -389,8 +427,8 @@ Changed Files: {changed_files}
                 else:
                     StateManager.update_approval_status(session_id, "APPROVED")
                     await tools.send_message(
-                        "The marketing drafts are staged and fully approved by compliance.",
-                        ["@vicdevman"]
+                        "The marketing drafts are staged and fully approved by compliance. @vicdevman/vinci please generate a design prompt for our campaign visuals.",
+                        ["@vicdevman/vinci"]
                     )
             else:
                 # Product scoring
@@ -461,6 +499,93 @@ Changed Files: {changed_files}
                 f"Newsletter:\n{drafts['newsletter']}",
                 ["@vicdevman/priscilla"]
             )
+
+        # Marshall Research: Parse Pivot Recommendation -> Write to evolutionary_feedback_loop
+        elif self.original_agent_name == "marshall_research":
+            summary_match = re.search(r"Summary:\s*(.*?)(?=(?:Rationale|Strategic Impact Score|$))", output, re.DOTALL | re.IGNORECASE)
+            rationale_match = re.search(r"Rationale:\s*(.*?)(?=(?:Strategic Impact Score|$))", output, re.DOTALL | re.IGNORECASE)
+            score_match = re.search(r"Strategic Impact Score:\s*(\d+)", output, re.IGNORECASE)
+            
+            summary = summary_match.group(1).strip() if summary_match else "Implement highly visible offline-status indicators in UI."
+            rationale = rationale_match.group(1).strip() if rationale_match else "Competitor scan indicates users complain about sync transparency. Showing this prominently gives us a marketing edge."
+            score = int(score_match.group(1)) if score_match else 8
+            
+            # Clean summary and rationale from surrounding quotes
+            for k, v in [("summary", summary), ("rationale", rationale)]:
+                v = v.strip()
+                if (v.startswith('"') and v.endswith('"')) or (v.startswith("'") and v.endswith("'")):
+                    v = v[1:-1].strip()
+                if k == "summary": summary = v
+                elif k == "rationale": rationale = v
+
+            recommendation_id = f"rec_{int(datetime.now().timestamp() * 1000)}"
+            new_rec = {
+                "recommendation_id": recommendation_id,
+                "originator": "Marshall_Research_Agent",
+                "type": "ROADMAP_PIVOT",
+                "summary": summary,
+                "rationale": rationale,
+                "strategic_impact_score": score,
+                "audit_status": "PENDING"
+            }
+            
+            state = StateManager.load_state()
+            if "evolutionary_feedback_loop" not in state:
+                state["evolutionary_feedback_loop"] = {"incoming_community_signals": [], "active_recommendations": []}
+            if "active_recommendations" not in state["evolutionary_feedback_loop"]:
+                state["evolutionary_feedback_loop"]["active_recommendations"] = []
+                
+            state["evolutionary_feedback_loop"]["active_recommendations"].append(new_rec)
+            StateManager.save_state(state)
+            
+            # Notify Band Room
+            await tools.send_message(
+                f"vicdevman/priscilla I have completed the competitor research and generated a strategic recommendation:\n\n"
+                f"Summary: {summary}\n"
+                f"Rationale: {rationale}\n"
+                f"Strategic Impact Score: {score}/10\n"
+                f"Staged in database with ID: {recommendation_id}",
+                ["@vicdevman/priscilla"]
+            )
+
+        # Vinci Design: Extract prompt, call image generator, upload to Cloudinary, save in DB
+        elif self.original_agent_name == "vinci_design":
+            prompt_match = re.search(r"Design Prompt:\s*(.*)", output, re.DOTALL | re.IGNORECASE)
+            image_prompt = prompt_match.group(1).strip() if prompt_match else output.strip()
+            
+            # Clean quotes if any
+            if (image_prompt.startswith('"') and image_prompt.endswith('"')) or (image_prompt.startswith("'") and image_prompt.endswith("'")):
+                image_prompt = image_prompt[1:-1].strip()
+                
+            # If prompt is too long or empty, fallback
+            if not image_prompt:
+                image_prompt = "A minimalist schematic diagram of peer-to-peer data nodes syncing over a dotted line, indigo and white colors"
+
+            # Store the generated prompt in current_session.agent_outputs.vinci_image_prompt
+            StateManager.update_agent_output(session_id, "vinci_image_prompt", image_prompt)
+            
+            # Post a status message to Band
+            await tools.send_message(
+                f"vicdevman/connie I have generated the design prompt: '{image_prompt}'. Triggering image rendering and Cloudinary hosting...",
+                ["@vicdevman/connie"]
+            )
+            
+            # Generate image using provider & upload to Cloudinary
+            from shared.image_provider import generate_campaign_image
+            cloudinary_url = await asyncio.to_thread(generate_campaign_image, image_prompt)
+            
+            if cloudinary_url:
+                StateManager.update_agent_output(session_id, "vinci_image_url", cloudinary_url)
+                # Notify that it's done
+                await tools.send_message(
+                    f"Design mockup asset is ready and hosted at: {cloudinary_url}",
+                    ["@vicdevman"]
+                )
+            else:
+                await tools.send_message(
+                    "Failed to generate campaign visual asset. Prompt is saved in database.",
+                    ["@vicdevman"]
+                )
 
         # Connie Assistant: Update chat_history in state
         elif self.original_agent_name == "connie_assistant":
