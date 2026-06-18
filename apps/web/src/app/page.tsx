@@ -623,7 +623,9 @@ export default function Dashboard() {
   // Connie Chat Box State
   const [chatMessage, setChatMessage] = useState('');
   const [sendingChat, setSendingChat] = useState(false);
+  const chatScrollContainerRef = useRef<HTMLDivElement>(null);
   const chatBottomRef = useRef<HTMLDivElement>(null);
+  const isChatNearBottomRef = useRef(true);
 
   // Toolbar settings
   const [showGrid, setShowGrid] = useState(true);
@@ -705,10 +707,21 @@ export default function Dashboard() {
     return () => clearInterval(interval);
   }, [fetchState]);
 
-  // Auto-scroll chat box
+  const currentChatHistory = state?.current_session?.chat_history || [];
+
+  // Auto-scroll chat box only when the user is already near the bottom.
+  const handleChatScroll = useCallback(() => {
+    const container = chatScrollContainerRef.current;
+    if (!container) return;
+
+    const distanceFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight;
+    isChatNearBottomRef.current = distanceFromBottom <= 72;
+  }, []);
+
   useEffect(() => {
-    chatBottomRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [state?.current_session?.chat_history]);
+    if (!isChatNearBottomRef.current) return;
+    chatBottomRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
+  }, [currentChatHistory.length, currentChatHistory[currentChatHistory.length - 1]?.id]);
 
   // Determine active session dynamically
   const isViewingHistory = !!selectedSessionId && selectedSessionId !== state?.current_session?.session_id;
@@ -1916,7 +1929,7 @@ export default function Dashboard() {
                         <img 
                           src={outputs.vinci_image_url} 
                           alt="Vinci Generated Graphic Asset" 
-                          className="w-full h-full object-contain max-h-[300px] rounded-lg border border-[#1e293b] "
+                          className="w-full h-full object-contain max-h-[300px] rounded-lg border  "
                         />
                       ) : (
                         <div className="flex flex-col items-center justify-center p-6 text-center text-slate-400">
@@ -2322,29 +2335,29 @@ export default function Dashboard() {
           style={{ background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(4px)' }}
           onClick={(e) => { if (e.target === e.currentTarget) setShowGitHubModal(false); }}
         >
-          <div className="w-full max-w-2xl max-h-[90vh] bg-[#0D0D10] border border-[#1e1e28] rounded-2xl shadow-2xl flex flex-col overflow-hidden" style={{ margin: '0 16px' }}>
+          <div className="w-full max-w-2xl max-h-[90vh] bg-white border border-slate-200 rounded-2xl shadow-2xl flex flex-col overflow-hidden" style={{ margin: '0 16px' }}>
             {/* Modal Header */}
-            <div className="flex items-center justify-between px-6 py-4 border-b border-[#1e1e28] shrink-0">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 shrink-0 bg-slate-50/80">
               <div className="flex items-center gap-2.5">
-                <div className="w-8 h-8 rounded-lg bg-gray-800 border border-gray-700 flex items-center justify-center">
+                <div className="w-8 h-8 rounded-lg bg-blue-600 border border-blue-500 flex items-center justify-center shadow-sm">
                   <GitBranch className="w-4 h-4 text-white" />
                 </div>
                 <div>
-                  <h3 className="text-sm font-bold text-white font-mono">GitHub Commit Explorer</h3>
-                  <p className="text-[10px] text-gray-400 font-mono">Load any public repo or enter a custom commit to trigger the agent pipeline</p>
+                  <h3 className="text-sm font-bold text-slate-900 font-mono">GitHub Commit Explorer</h3>
+                  <p className="text-[10px] text-slate-500 font-mono">Load any public repo or enter a custom commit to trigger the agent pipeline</p>
                 </div>
               </div>
-              <button onClick={() => setShowGitHubModal(false)} className="p-1.5 rounded text-gray-500 hover:text-white hover:bg-gray-800 transition-colors">
+              <button onClick={() => setShowGitHubModal(false)} className="p-1.5 rounded text-slate-500 hover:text-slate-900 hover:bg-slate-100 transition-colors">
                 <X className="w-4 h-4" />
               </button>
             </div>
 
             {/* Mode tabs — 3 tabs */}
-            <div className="flex gap-0 border-b border-[#1e1e28] shrink-0">
+            <div className="flex gap-0 border-b border-slate-200 shrink-0 bg-white">
               <button
                 onClick={() => setModalTab('github')}
                 className={`flex items-center gap-1.5 px-5 py-3 text-xs font-bold font-mono border-b-2 transition-colors ${
-                  modalTab === 'github' ? 'border-blue-500 text-blue-400' : 'border-transparent text-gray-500 hover:text-gray-300'
+                  modalTab === 'github' ? 'border-blue-600 text-blue-700' : 'border-transparent text-slate-500 hover:text-slate-800'
                 }`}
               >
                 <GitCommit className="w-3.5 h-3.5" />
@@ -2353,17 +2366,17 @@ export default function Dashboard() {
               <button
                 onClick={() => setModalTab('brand')}
                 className={`flex items-center gap-1.5 px-5 py-3 text-xs font-bold font-mono border-b-2 transition-colors ${
-                  modalTab === 'brand' ? 'border-amber-500 text-amber-400' : 'border-transparent text-gray-500 hover:text-gray-300'
+                  modalTab === 'brand' ? 'border-blue-600 text-blue-700' : 'border-transparent text-slate-500 hover:text-slate-800'
                 }`}
               >
                 <Building2 className="w-3.5 h-3.5" />
                 Brand Context
-                {brandName && <span className="ml-1.5 text-[9px] bg-amber-500/20 text-amber-400 rounded px-1.5 py-0.5 font-mono">{brandName.slice(0, 12)}{brandName.length > 12 ? '…' : ''}</span>}
+                {brandName && <span className="ml-1.5 text-[9px] bg-blue-50 text-blue-700 border border-blue-100 rounded px-1.5 py-0.5 font-mono">{brandName.slice(0, 12)}{brandName.length > 12 ? '…' : ''}</span>}
               </button>
               <button
                 onClick={() => setModalTab('custom')}
                 className={`flex items-center gap-1.5 px-5 py-3 text-xs font-bold font-mono border-b-2 transition-colors ${
-                  modalTab === 'custom' ? 'border-purple-500 text-purple-400' : 'border-transparent text-gray-500 hover:text-gray-300'
+                  modalTab === 'custom' ? 'border-blue-600 text-blue-700' : 'border-transparent text-slate-500 hover:text-slate-800'
                 }`}
               >
                 <Edit3 className="w-3.5 h-3.5" />
@@ -2372,7 +2385,7 @@ export default function Dashboard() {
             </div>
 
             {/* Modal Body */}
-            <div className="flex-1 overflow-y-auto p-6 flex flex-col gap-5">
+            <div className="flex-1 overflow-y-auto p-6 flex flex-col gap-5 bg-slate-50/60">
 
               {/* --- GITHUB REPO MODE --- */}
               {modalTab === 'github' && (
@@ -2387,12 +2400,12 @@ export default function Dashboard() {
                         onChange={(e) => setGhRepoUrl(e.target.value)}
                         onKeyDown={(e) => e.key === 'Enter' && loadGitHubCommits()}
                         placeholder="https://github.com/owner/repo"
-                        className="flex-1 bg-[#111116] border border-[#2a2a35] rounded-lg px-4 py-2.5 text-sm text-white font-mono placeholder-gray-600 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500/40 transition-colors"
+                        className="flex-1 bg-white border border-slate-200 rounded-lg px-4 py-2.5 text-sm text-slate-900 font-mono placeholder-slate-400 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 transition-colors"
                       />
                       <button
                         onClick={loadGitHubCommits}
                         disabled={loadingCommits}
-                        className="flex items-center gap-1.5 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-800 disabled:cursor-not-allowed text-white text-xs font-bold px-4 py-2.5 rounded-lg transition-colors shrink-0"
+                        className="flex items-center gap-1.5 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-300 disabled:cursor-not-allowed text-white text-xs font-bold px-4 py-2.5 rounded-lg transition-colors shrink-0 shadow-sm"
                       >
                         {loadingCommits ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
                         {loadingCommits ? 'Loading...' : 'Load Commits'}
@@ -2404,22 +2417,22 @@ export default function Dashboard() {
                       value={ghToken}
                       onChange={(e) => setGhToken(e.target.value)}
                       placeholder="GitHub Personal Access Token (optional — increases rate limits)"
-                      className="bg-[#111116] border border-[#2a2a35] rounded-lg px-4 py-2 text-xs text-gray-300 font-mono placeholder-gray-600 focus:outline-none focus:border-gray-500 transition-colors"
+                      className="bg-white border border-slate-200 rounded-lg px-4 py-2 text-xs text-slate-900 font-mono placeholder-slate-400 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 transition-colors"
                     />
                   </div>
 
                   {/* Brand-to-repo association indicator */}
                   {brandName && (
-                    <div className="flex items-center justify-between px-3.5 py-2.5 bg-amber-950/30 border border-amber-800/30 rounded-xl">
+                    <div className="flex items-center justify-between px-3.5 py-2.5 bg-blue-50 border border-blue-100 rounded-xl">
                       <div className="flex items-center gap-2">
-                        <Building2 className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-                        <span className="text-[11px] font-mono text-amber-200">
-                          Commits will be analyzed using <strong className="text-amber-100">{brandName}</strong> brand guidelines
+                        <Building2 className="w-3.5 h-3.5 text-blue-600 shrink-0" />
+                        <span className="text-[11px] font-mono text-slate-700">
+                          Commits will be analyzed using <strong className="text-blue-700">{brandName}</strong> brand guidelines
                         </span>
                       </div>
                       <button
                         onClick={() => setModalTab('brand')}
-                        className="text-[10px] font-bold font-mono text-amber-400 hover:text-amber-200 transition-colors ml-2 shrink-0"
+                        className="text-[10px] font-bold font-mono text-blue-600 hover:text-blue-700 transition-colors ml-2 shrink-0"
                       >
                         Edit →
                       </button>
@@ -2428,9 +2441,9 @@ export default function Dashboard() {
 
                   {/* Error state */}
                   {ghCommitsError && (
-                    <div className="flex items-center gap-2 p-3 bg-red-950/50 border border-red-800/50 rounded-lg">
-                      <AlertCircle className="w-4 h-4 text-red-400 shrink-0" />
-                      <span className="text-xs text-red-300 font-mono">{ghCommitsError}</span>
+                    <div className="flex items-center gap-2 p-3 bg-red-50 border border-red-200 rounded-lg">
+                      <AlertCircle className="w-4 h-4 text-red-500 shrink-0" />
+                      <span className="text-xs text-red-700 font-mono">{ghCommitsError}</span>
                     </div>
                   )}
 
@@ -2438,33 +2451,33 @@ export default function Dashboard() {
                   {ghCommits.length > 0 && (
                     <div className="flex flex-col gap-2">
                       <div className="flex items-center justify-between">
-                        <span className="text-[10px] font-bold uppercase tracking-wider text-gray-400 font-mono">Recent Commits — click to analyze</span>
-                        <span className="text-[10px] font-mono text-gray-600">{ghCommits.length} commits loaded</span>
+                        <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500 font-mono">Recent Commits — click to analyze</span>
+                        <span className="text-[10px] font-mono text-slate-500">{ghCommits.length} commits loaded</span>
                       </div>
                       <div className="flex flex-col gap-1.5">
                         {ghCommits.map((commit: any, idx: number) => (
                           <button
                             key={commit.sha}
                             onClick={() => triggerWithGitHubCommit(commit)}
-                            className="group w-full flex items-start gap-3 p-3.5 rounded-xl bg-[#111116] border border-[#1e1e28] hover:border-blue-500/50 hover:bg-[#13131a] text-left transition-all duration-150"
+                            className="group w-full flex items-start gap-3 p-3.5 rounded-xl bg-white border border-slate-200 hover:border-blue-300 hover:bg-blue-50 text-left transition-all duration-150 "
                           >
-                            <div className="shrink-0 w-6 h-6 rounded-md bg-gray-800 flex items-center justify-center mt-0.5">
-                              <GitCommit className="w-3 h-3 text-gray-400 group-hover:text-blue-400 transition-colors" />
+                            <div className="shrink-0 w-6 h-6 rounded-md bg-blue-50 border border-blue-100 flex items-center justify-center mt-0.5">
+                              <GitCommit className="w-3 h-3 text-blue-600 transition-colors" />
                             </div>
                             <div className="flex-1 min-w-0">
-                              <p className="text-xs font-semibold text-gray-100 font-mono leading-snug truncate group-hover:text-white">
+                              <p className="text-xs font-semibold text-slate-900 font-mono leading-snug truncate group-hover:text-blue-900">
                                 {commit.commit.message.split('\n')[0]}
                               </p>
                               <div className="flex items-center gap-3 mt-1">
-                                <span className="text-[10px] text-gray-500 font-mono">{commit.sha?.slice(0, 7)}</span>
-                                <span className="text-[10px] text-gray-500 font-mono">{commit.commit?.author?.name}</span>
-                                <span className="text-[10px] text-gray-500 font-mono">
+                                <span className="text-[10px] text-slate-500 font-mono">{commit.sha?.slice(0, 7)}</span>
+                                <span className="text-[10px] text-slate-500 font-mono">{commit.commit?.author?.name}</span>
+                                <span className="text-[10px] text-slate-500 font-mono">
                                   {commit.commit?.author?.date ? new Date(commit.commit.author.date).toLocaleDateString() : ''}
                                 </span>
                               </div>
                             </div>
                             <div className="shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
-                              <span className="text-[10px] font-bold text-blue-400 font-mono bg-blue-500/10 rounded px-2 py-1">Analyze →</span>
+                              <span className="text-[10px] font-bold text-blue-700 font-mono bg-blue-50 border border-blue-100 rounded px-2 py-1">Analyze →</span>
                             </div>
                           </button>
                         ))}
@@ -2475,9 +2488,9 @@ export default function Dashboard() {
                   {/* Empty prompt */}
                   {ghCommits.length === 0 && !ghCommitsError && !loadingCommits && (
                     <div className="flex flex-col items-center justify-center py-10 text-center">
-                      <GitBranch className="w-10 h-10 text-gray-700 mb-3" />
-                      <p className="text-xs text-gray-500 font-mono">Enter a GitHub repo URL above and click Load Commits.</p>
-                      <p className="text-[10px] text-gray-600 font-mono mt-1">Works with any public repository. Try: <span className="text-blue-500">github.com/microsoft/vscode</span></p>
+                      <GitBranch className="w-10 h-10 text-slate-300 mb-3" />
+                      <p className="text-xs text-slate-500 font-mono">Enter a GitHub repo URL above and click Load Commits.</p>
+                      <p className="text-[10px] text-slate-400 font-mono mt-1">Works with any public repository. Try: <span className="text-blue-600">github.com/microsoft/vscode</span></p>
                     </div>
                   )}
                 </>
@@ -2488,11 +2501,11 @@ export default function Dashboard() {
                 <div className="flex flex-col gap-5">
 
                   {/* Explainer banner */}
-                  <div className="flex items-start gap-3 p-4 bg-amber-950/30 border border-amber-800/30 rounded-xl">
-                    <Sparkles className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                  <div className="flex items-start gap-3 p-4 bg-blue-50 border border-blue-100 rounded-xl">
+                    <Sparkles className="w-4 h-4 text-blue-600 shrink-0 mt-0.5" />
                     <div>
-                      <p className="text-xs font-semibold text-amber-200 font-mono">Brand Context is injected into every agent</p>
-                      <p className="text-[10px] text-amber-300/70 font-mono mt-0.5 leading-relaxed">
+                      <p className="text-xs font-semibold text-slate-900 font-mono">Brand Context is injected into every agent</p>
+                      <p className="text-[10px] text-slate-600 font-mono mt-0.5 leading-relaxed">
                         All 6 agents read these guidelines before every pipeline run. Change company, connect a different repo, and ShipStory adapts instantly.
                       </p>
                     </div>
@@ -2506,7 +2519,7 @@ export default function Dashboard() {
                       value={brandName}
                       onChange={e => setBrandName(e.target.value)}
                       placeholder="e.g. Nexus Labs"
-                      className="bg-[#111116] border border-[#2a2a35] rounded-lg px-4 py-2.5 text-sm text-white font-mono placeholder-gray-600 focus:outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500/30 transition-colors"
+                      className="bg-white border border-slate-200 rounded-lg px-4 py-2.5 text-sm text-slate-900 font-mono placeholder-slate-400 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 transition-colors"
                     />
                   </div>
 
@@ -2518,7 +2531,7 @@ export default function Dashboard() {
                       onChange={e => setBrandValueProp(e.target.value)}
                       placeholder="What problem do you solve? Who for? What makes you different?"
                       rows={2}
-                      className="bg-[#111116] border border-[#2a2a35] rounded-lg px-4 py-3 text-sm text-white font-mono placeholder-gray-600 focus:outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500/30 resize-none transition-colors"
+                      className="bg-white border border-slate-200 rounded-lg px-4 py-3 text-sm text-slate-900 font-mono placeholder-slate-400 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 resize-y min-h-[88px] transition-colors"
                     />
                   </div>
 
@@ -2531,7 +2544,7 @@ export default function Dashboard() {
                         value={brandPersona}
                         onChange={e => setBrandPersona(e.target.value)}
                         placeholder="e.g. Solo devs, lean startups"
-                        className="bg-[#111116] border border-[#2a2a35] rounded-lg px-4 py-2.5 text-sm text-white font-mono placeholder-gray-600 focus:outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500/30 transition-colors"
+                        className="bg-white border border-slate-200 rounded-lg px-4 py-2.5 text-sm text-slate-900 font-mono placeholder-slate-400 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 transition-colors"
                       />
                     </div>
                     <div className="flex flex-col gap-1.5">
@@ -2541,7 +2554,7 @@ export default function Dashboard() {
                         value={brandTone}
                         onChange={e => setBrandTone(e.target.value)}
                         placeholder="e.g. Bold, technical, startup-energetic"
-                        className="bg-[#111116] border border-[#2a2a35] rounded-lg px-4 py-2.5 text-sm text-white font-mono placeholder-gray-600 focus:outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500/30 transition-colors"
+                        className="bg-white border border-slate-200 rounded-lg px-4 py-2.5 text-sm text-slate-900 font-mono placeholder-slate-400 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 transition-colors"
                       />
                     </div>
                   </div>
@@ -2556,12 +2569,12 @@ export default function Dashboard() {
                       value={brandKeywords}
                       onChange={e => setBrandKeywords(e.target.value)}
                       placeholder="pivot, exit strategy, acquisition target, bankruptcy"
-                      className="bg-[#111116] border border-[#2a2a35] rounded-lg px-4 py-2.5 text-sm text-white font-mono placeholder-gray-600 focus:outline-none focus:border-red-500 focus:ring-1 focus:ring-red-500/30 transition-colors"
+                      className="bg-white border border-slate-200 rounded-lg px-4 py-2.5 text-sm text-slate-900 font-mono placeholder-slate-400 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 transition-colors"
                     />
                     {brandKeywords && (
                       <div className="flex flex-wrap gap-1.5 mt-1">
                         {brandKeywords.split(',').map(k => k.trim()).filter(Boolean).map((kw, i) => (
-                          <span key={i} className="text-[10px] font-mono bg-red-950/40 text-red-300 border border-red-800/30 rounded px-2 py-0.5">
+                          <span key={i} className="text-[10px] font-mono bg-blue-50 text-blue-700 border border-blue-100 rounded px-2 py-0.5">
                             {kw}
                           </span>
                         ))}
@@ -2577,7 +2590,7 @@ export default function Dashboard() {
                       onChange={e => setBrandVoice(e.target.value)}
                       placeholder="Free-form notes: writing style, content length, things to avoid, specific phrases..."
                       rows={3}
-                      className="bg-[#111116] border border-[#2a2a35] rounded-lg px-4 py-3 text-sm text-white font-mono placeholder-gray-600 focus:outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500/30 resize-none transition-colors"
+                      className="bg-white border border-slate-200 rounded-lg px-4 py-3 text-sm text-slate-900 font-mono placeholder-slate-400 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 resize-y min-h-[112px] transition-colors"
                     />
                   </div>
 
@@ -2589,8 +2602,8 @@ export default function Dashboard() {
                       brandSaved
                         ? 'bg-emerald-600 text-white'
                         : savingBrand
-                        ? 'bg-gray-800 text-gray-400 cursor-not-allowed'
-                        : 'bg-amber-500 hover:bg-amber-400 text-gray-900'
+                        ? 'bg-gray-200 text-gray-400 cursor-not-allowed'
+                        : 'bg-blue-600 hover:bg-blue-700 text-white'
                     }`}
                   >
                     {savingBrand ? (
@@ -2619,7 +2632,7 @@ export default function Dashboard() {
                       onChange={(e) => setCustomCommitMsg(e.target.value)}
                       placeholder={"feat(auth): implement OAuth2 with JWT refresh tokens\n\nAdds secure token rotation and revocation endpoints."}
                       rows={4}
-                      className="bg-[#111116] border border-[#2a2a35] rounded-lg px-4 py-3 text-sm text-white font-mono placeholder-gray-600 focus:outline-none focus:border-purple-500 focus:ring-1 focus:ring-purple-500/40 resize-none transition-colors"
+                      className="bg-white border border-slate-200 rounded-lg px-4 py-3 text-sm text-slate-900 font-mono placeholder-slate-400 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 resize-y min-h-[120px] transition-colors"
                     />
                   </div>
                   <div className="flex flex-col gap-2">
@@ -2629,20 +2642,20 @@ export default function Dashboard() {
                       value={customFiles}
                       onChange={(e) => setCustomFiles(e.target.value)}
                       placeholder="auth/oauth.go, middleware/jwt.go, handlers/user.go"
-                      className="bg-[#111116] border border-[#2a2a35] rounded-lg px-4 py-2.5 text-sm text-white font-mono placeholder-gray-600 focus:outline-none focus:border-purple-500 focus:ring-1 focus:ring-purple-500/40 transition-colors"
+                      className="bg-white border border-slate-200 rounded-lg px-4 py-2.5 text-sm text-slate-900 font-mono placeholder-slate-400 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 transition-colors"
                     />
                   </div>
                   {/* Brand context reminder */}
                   {brandName && (
-                    <div className="flex items-center gap-2 px-3 py-2 bg-amber-950/20 border border-amber-800/20 rounded-lg">
-                      <Building2 className="w-3.5 h-3.5 text-amber-500 shrink-0" />
-                      <span className="text-[10px] font-mono text-amber-300/80">Will be analyzed under <strong className="text-amber-200">{brandName}</strong></span>
+                    <div className="flex items-center gap-2 px-3 py-2 bg-blue-50 border border-blue-100 rounded-lg">
+                      <Building2 className="w-3.5 h-3.5 text-blue-600 shrink-0" />
+                      <span className="text-[10px] font-mono text-slate-700">Will be analyzed under <strong className="text-blue-700">{brandName}</strong></span>
                     </div>
                   )}
                   <button
                     onClick={triggerWithCustomCommit}
                     disabled={!customCommitMsg.trim()}
-                    className="flex items-center justify-center gap-2 w-full py-3 bg-purple-600 hover:bg-purple-700 disabled:bg-gray-800 disabled:text-gray-500 disabled:cursor-not-allowed text-white font-bold text-sm rounded-xl transition-colors"
+                    className="flex items-center justify-center gap-2 w-full py-3 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-200 disabled:text-gray-500 disabled:cursor-not-allowed text-white font-bold text-sm rounded-xl transition-colors"
                   >
                     <Play className="w-4 h-4 fill-current" />
                     Trigger Pipeline with Custom Commit
@@ -2653,13 +2666,13 @@ export default function Dashboard() {
             </div>
 
             {/* Modal Footer */}
-            <div className="flex items-center justify-between px-6 py-3 border-t border-[#1e1e28] bg-[#0A0A0D] shrink-0">
-              <p className="text-[10px] text-gray-600 font-mono">
+            <div className="flex items-center justify-between px-6 py-3 border-t border-slate-200 bg-slate-50 shrink-0">
+              <p className="text-[10px] text-slate-500 font-mono">
                 {modalTab === 'brand' ? 'Brand context is injected into all 6 agent backstories before each run' : 'Real commit data is passed to Devin for richer technical analysis'}
               </p>
               <button
                 onClick={() => setShowGitHubModal(false)}
-                className="text-xs font-mono text-gray-500 hover:text-gray-300 transition-colors"
+                className="text-xs font-mono text-slate-500 hover:text-slate-900 transition-colors"
               >
                 Cancel
               </button>

@@ -116,6 +116,30 @@
         "sender": "connie",
         "message": "Hello! How can I assist you today?",
         "timestamp": "12:37:20 PM"
+      },
+      {
+        "id": "msg_user_1781783314809",
+        "sender": "user",
+        "message": "so what agents do we have up and running?",
+        "timestamp": "12:48:34 p.m."
+      },
+      {
+        "id": "msg_connie_1781783329576",
+        "sender": "connie",
+        "message": "I'm responsible for connecting you with the right resources. Let me check the available specialized agents for you. Please give me a moment.",
+        "timestamp": "12:48:49 PM"
+      },
+      {
+        "id": "msg_user_1781783745722",
+        "sender": "user",
+        "message": "hey active ?",
+        "timestamp": "11:55:45 AM"
+      },
+      {
+        "id": "msg_user_1781783823718",
+        "sender": "user",
+        "message": "hey connie whay arent you answering me",
+        "timestamp": "11:57:03 AM"
       }
     ]
   },
