@@ -137,33 +137,42 @@ async function readJsonFileWithRetry(filePath: string, retries = 3, delayMs = 50
 }
 
 export async function GET() {
+  const dbPath = getDbPath();
+  let state: any = null;
+
   try {
-    const dbPath = getDbPath();
     await connectMongoose();
-    let state = await CompanyBrain.findOne({ _id: "nexus_labs_brain" }).lean();
+    state = await CompanyBrain.findOne({ _id: "nexus_labs_brain" }).lean();
     if (state) {
       cachedState = state; // Update cache on success
       // Keep local JSON in sync
       await saveLocalFallback(dbPath, state);
       return NextResponse.json(state);
     }
-
-    state = await readJsonFileWithRetry(dbPath);
-    cachedState = state; // Update cache on success
-    return NextResponse.json(state);
   } catch (error) {
-    console.error('Failed to read database state in GET /api/brain:', error);
-    
-    // Return cached state if we have one, to prevent breaking the frontend polling loop
-    if (cachedState) {
-      console.log('Returning cached company brain state.');
-      return NextResponse.json(cachedState);
-    }
-    
-    return NextResponse.json(
-      { error: 'Failed to read database state', details: String(error) },
-      { status: 500 }
-    );
+    console.error('Failed to read database state from MongoDB in GET /api/brain:', error);
   }
+
+  // Fallback to local JSON file
+  try {
+    state = await readJsonFileWithRetry(dbPath);
+    if (state) {
+      cachedState = state; // Update cache on success
+      return NextResponse.json(state);
+    }
+  } catch (fallbackError) {
+    console.error('Failed to read local fallback JSON state in GET /api/brain:', fallbackError);
+  }
+
+  // Return cached state if we have one, to prevent breaking the frontend polling loop
+  if (cachedState) {
+    console.log('Returning cached company brain state.');
+    return NextResponse.json(cachedState);
+  }
+  
+  return NextResponse.json(
+    { error: 'Failed to read database state from MongoDB and local fallback files' },
+    { status: 500 }
+  );
 }
 

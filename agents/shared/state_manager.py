@@ -169,6 +169,18 @@ class StateManager:
         """Initializes a brand new session with default empty states in the database."""
         from datetime import datetime, timezone
         state = cls.load_state()
+        
+        # Archive the existing current_session to session_history if it exists and has a session_id
+        if "current_session" in state and state["current_session"].get("session_id"):
+            if "session_history" not in state:
+                state["session_history"] = []
+            
+            # Check if this session is already in history to prevent duplicates
+            existing_ids = {s.get("session_id") for s in state["session_history"]}
+            if state["current_session"]["session_id"] not in existing_ids:
+                state["session_history"].append(state["current_session"])
+                print(f"[StateManager] Archived session {state['current_session']['session_id']} to session_history.")
+
         state["current_session"] = {
             "session_id": session_id,
             "created_at": datetime.now(timezone.utc).isoformat(),

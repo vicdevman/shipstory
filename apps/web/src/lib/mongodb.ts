@@ -21,13 +21,23 @@ export async function connectMongoose() {
     const opts = {
       bufferCommands: false,
       dbName: 'shipstory',
+      serverSelectionTimeoutMS: 5000, // Fail fast if Atlas is down
     } as any;
     cached.promise = mongoose.connect(uri, opts).then((mongooseInstance) => {
       return mongooseInstance;
+    }).catch((err) => {
+      cached.promise = null; // Clear on failure so subsequent requests can try reconnecting
+      throw err;
     });
   }
 
-  cached.conn = await cached.promise;
+  try {
+    cached.conn = await cached.promise;
+  } catch (err) {
+    cached.conn = null;
+    cached.promise = null; // Clear on failure so subsequent requests can try reconnecting
+    throw err;
+  }
   return cached.conn;
 }
 

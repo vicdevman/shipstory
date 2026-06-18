@@ -71,6 +71,18 @@ export async function POST(request: Request) {
       changed_files: body.changed_files || [],
     };
 
+    // Archive previous session to session_history if it exists
+    if (state.current_session && state.current_session.session_id) {
+      if (!state.session_history) {
+        state.session_history = [];
+      }
+      const existingIds = new Set(state.session_history.map((s: any) => s.session_id));
+      if (!existingIds.has(state.current_session.session_id)) {
+        state.session_history.push(state.current_session);
+        console.log(`[Webhook API] Archived session ${state.current_session.session_id} to history.`);
+      }
+    }
+
     // Initialize the session state
     state.current_session = {
       session_id: sessionId,

@@ -42,6 +42,8 @@ import {
   Loader,
   ArrowUp
 } from 'lucide-react';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 
 // Custom Node Component to render workflow agents, triggers, conditions, and outputs with high legibility
 const CustomNode = React.memo(({ data, selected }: any) => {
@@ -584,6 +586,15 @@ export default function Dashboard() {
   const [approvingRec, setApprovingRec] = useState<string | null>(null);
   const [shipping, setShipping] = useState(false);
 
+  // Run History selected run ID
+  const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
+
+  // Editable drafts local state
+  const [editedTwitter, setEditedTwitter] = useState('');
+  const [editedChangelog, setEditedChangelog] = useState('');
+  const [editedNewsletter, setEditedNewsletter] = useState('');
+  const [savingDrafts, setSavingDrafts] = useState(false);
+
   // Layout View Switcher
   const [view, setView] = useState<'canvas' | 'startup' | 'outputs'>('canvas');
 
@@ -646,11 +657,81 @@ export default function Dashboard() {
     // chatBottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [state?.current_session?.chat_history]);
 
+  // Determine active session dynamically
+  const isViewingHistory = !!selectedSessionId && selectedSessionId !== state?.current_session?.session_id;
+  const session = isViewingHistory
+    ? (state?.session_history || []).find((s: any) => s.session_id === selectedSessionId) || state?.current_session || {}
+    : state?.current_session || {};
+
+  // Initialize drafts when session changes
+  useEffect(() => {
+    const drafts = session?.agent_outputs?.gigi_content_drafts;
+    if (drafts) {
+      setEditedTwitter(drafts.twitter || '');
+      setEditedChangelog(drafts.changelog || '');
+      setEditedNewsletter(drafts.newsletter || '');
+    } else {
+      setEditedTwitter('');
+      setEditedChangelog('');
+      setEditedNewsletter('');
+    }
+  }, [session?.session_id, session?.agent_outputs?.gigi_content_drafts]);
+
+  // Save drafts handler
+  const handleSaveDrafts = async () => {
+    setSavingDrafts(true);
+    try {
+      const res = await fetch('/api/approve', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'update_drafts',
+          drafts: {
+            twitter: editedTwitter,
+            changelog: editedChangelog,
+            newsletter: editedNewsletter,
+          }
+        }),
+      });
+      if (res.ok) {
+        await fetchState();
+        alert('Drafts successfully saved and pushed to database!');
+      } else {
+        alert('Failed to save drafts.');
+      }
+    } catch (err) {
+      console.error('Error saving drafts:', err);
+    } finally {
+      setSavingDrafts(false);
+    }
+  };
+
+  // Copy helper
+  const handleCopy = async (text: string, label: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch (err) {
+      console.error('Failed to copy: ', err);
+    }
+  };
+
+  // Publish helper
+  const handlePublishCampaign = async () => {
+    if (confirm('Are you sure you want to publish this campaign? This will ship the announcement copy.')) {
+      await handleShipCopy();
+      alert('Campaign successfully published to socials (simulated)!');
+    }
+  };
+
   // Synchronize React Flow nodes with backend DB state
   useEffect(() => {
     if (!state) return;
 
-    const session = state.current_session || {};
+    const isViewingHistory = !!selectedSessionId && selectedSessionId !== state.current_session?.session_id;
+    const session = isViewingHistory
+      ? (state.session_history || []).find((s: any) => s.session_id === selectedSessionId) || state.current_session || {}
+      : state.current_session || {};
+
     const outputs = session.agent_outputs || {};
     const rejections = session.rejections_and_memos || [];
     const status = session.status || 'IDLE';
@@ -744,18 +825,20 @@ export default function Dashboard() {
         // 5a. Marshall Research Node
         else if (node.id === 'marshall') {
           const recs = state.evolutionary_feedback_loop?.active_recommendations || [];
-          const hasRecs = recs.length > 0;
+          const marshallRec = outputs.marshall_recommendation;
+          const hasRecs = recs.length > 0 || !!marshallRec;
           if (status === 'PROCESSING') {
             nodeStatus = hasRecs ? 'success' : 'running';
           } else if (hasRecs) {
             nodeStatus = 'success';
           }
-          const latestRec = recs[recs.length - 1];
+          // Prefer live evolutionary_feedback_loop rec, fall back to agent_outputs.marshall_recommendation
+          const latestRec = recs[recs.length - 1] || marshallRec;
           fields = [
             { 
               label: 'Strategic Pivot', 
               value: latestRec 
-                ? `[${latestRec.type}] ${latestRec.summary}\nRationale: ${latestRec.rationale}\nImpact Score: ${latestRec.strategic_impact_score}/10` 
+                ? `[ROADMAP_PIVOT] ${latestRec.summary}\nRationale: ${latestRec.rationale}\nImpact Score: ${latestRec.strategic_impact_score}/10` 
                 : (nodeStatus === 'running' ? 'Scanning competitor pricing & gaps...' : 'Awaiting session start...')
             }
           ];
@@ -806,7 +889,7 @@ export default function Dashboard() {
                 label: 'Approve & Ship Campaign',
                 variant: 'primary',
                 onClick: handleShipCopy,
-                disabled: shipping,
+                disabled: shipping || isViewingHistory,
                 loading: shipping
               }
             ];
@@ -937,6 +1020,7 @@ export default function Dashboard() {
 
   // Webhook manual trigger
   const handleSimulateWebhook = async () => {
+    setSelectedSessionId(null); // Reset history view to active
     setTriggering(true);
     try {
       const res = await fetch('/api/webhook', {
@@ -958,6 +1042,7 @@ export default function Dashboard() {
 
   // Strategic roadmap pivot approval
   const handleApproveRec = async (recId: string) => {
+    if (isViewingHistory) return;
     setApprovingRec(recId);
     try {
       await fetch('/api/approve', {
@@ -975,6 +1060,7 @@ export default function Dashboard() {
 
   // Social publish trigger
   const handleShipCopy = async () => {
+    if (isViewingHistory) return;
     setShipping(true);
     try {
       await fetch('/api/approve', {
@@ -1029,7 +1115,6 @@ export default function Dashboard() {
     );
   }
 
-  const session = state.current_session || {};
   const metadata = state.company_metadata || {};
   const assets = state.operational_assets || {};
   const feedback = state.evolutionary_feedback_loop || {};
@@ -1067,10 +1152,35 @@ export default function Dashboard() {
         </div>
 
         <div className="flex items-center gap-3">
-          <div className="flex items-center gap-2 bg-green-50 text-green-700 text-xs rounded-full border border-green-100" style={{ padding: '4px 12px' }}>
-            <span className="status-dot active"></span>
-            <span className="font-mono">Workspace Sync Active</span>
-          </div>
+          {isViewingHistory && (
+            <div className="flex items-center gap-2 bg-amber-500/10 text-amber-500 text-xs rounded-full border border-amber-500/20 font-bold px-3 py-1 font-mono uppercase tracking-wider animate-pulse">
+              ⚠️ Viewing History
+            </div>
+          )}
+
+          {/* Run History Selector Dropdown */}
+          {state.session_history && state.session_history.length > 0 && (
+            <div className="flex items-center gap-1.5 bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 shadow-xs">
+              <span className="text-[10px] font-bold font-mono text-gray-500 uppercase">Run History:</span>
+              <select
+                value={selectedSessionId || state.current_session?.session_id || ''}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  setSelectedSessionId(val === state.current_session?.session_id ? null : val);
+                }}
+                className="text-xs font-mono font-bold bg-transparent border-0 focus:ring-0 text-gray-700 outline-none cursor-pointer"
+              >
+                <option value={state.current_session?.session_id || ''}>
+                  Active Run ({state.current_session?.raw_inputs?.commit_message?.slice(0, 16) || 'Manual'}...)
+                </option>
+                {state.session_history.slice().reverse().map((s: any) => (
+                  <option key={s.session_id} value={s.session_id}>
+                    Run ({s.raw_inputs?.commit_message?.slice(0, 16) || 'Manual'}...)
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
 
           <button
             onClick={() => setIsRightSidebarOpen(!isRightSidebarOpen)}
@@ -1088,7 +1198,7 @@ export default function Dashboard() {
           
           <button
             onClick={handleSimulateWebhook}
-            disabled={triggering || session.status === 'PROCESSING'}
+            disabled={triggering || state.current_session?.status === 'PROCESSING'}
             className="flex items-center gap-1.5 h-9 bg-blue-600 text-white hover:bg-blue-700 disabled:bg-blue-400 disabled:cursor-not-allowed font-semibold text-xs transition-colors"
             style={{ padding: '8px 16px', borderRadius: '8px' }}
           >
@@ -1438,13 +1548,31 @@ export default function Dashboard() {
                   <h2 className="text-xl font-bold tracking-tight text-gray-900 font-mono">Campaign Deliverables</h2>
                   <p className="text-xs text-gray-500 mt-1">Review staged copy drafts and execute campaign distribution</p>
                 </div>
-                <button 
-                  onClick={() => setView('canvas')} 
-                  className="flex items-center gap-1 text-xs font-bold text-blue-600 hover:text-blue-700 hover:underline"
-                >
-                  <span>Go to Canvas</span>
-                  <ArrowRight className="w-3.5 h-3.5" />
-                </button>
+                <div className="flex items-center gap-3">
+                  <button 
+                    onClick={handleSaveDrafts}
+                    disabled={savingDrafts || !outputs.gigi_content_drafts?.twitter || isViewingHistory}
+                    className="flex items-center gap-1.5 h-9 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-100 disabled:text-gray-400 disabled:cursor-not-allowed text-white font-semibold text-xs transition-colors rounded-lg px-4"
+                  >
+                    {savingDrafts ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
+                    <span>Save</span>
+                  </button>
+                  <button 
+                    onClick={handlePublishCampaign}
+                    disabled={outputs.approval_status !== 'APPROVED' || isViewingHistory}
+                    className="flex items-center gap-1.5 h-9 bg-emerald-600 hover:bg-emerald-700 disabled:bg-gray-100 disabled:text-gray-400 disabled:cursor-not-allowed text-white font-semibold text-xs transition-colors rounded-lg px-4"
+                  >
+                    <Globe className="w-3.5 h-3.5" />
+                    <span>Publish</span>
+                  </button>
+                  <button 
+                    onClick={() => setView('canvas')} 
+                    className="flex items-center gap-1 text-xs font-bold text-blue-600 hover:text-blue-700 hover:underline"
+                  >
+                    <span>Go to Canvas</span>
+                    <ArrowRight className="w-3.5 h-3.5" />
+                  </button>
+                </div>
               </div>
 
               {/* Marketing Copy Stage Cards */}
@@ -1452,39 +1580,72 @@ export default function Dashboard() {
                 <span className="text-[10px] uppercase font-bold text-green-600 font-mono tracking-widest">Staged Copy drafts</span>
                 
                 {outputs.gigi_content_drafts && outputs.gigi_content_drafts.twitter ? (
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                     
                     {/* Twitter Post Card */}
                     <div className="bg-white border border-gray-200 rounded-xl p-5 flex flex-col gap-3" style={{ padding: '20px' }}>
                       <div className="flex justify-between items-center">
                         <span className="text-[10px] uppercase font-bold text-blue-500 font-mono">Twitter Announcement</span>
-                        <span className="text-[9px] font-mono bg-blue-50 text-blue-600 rounded px-1.5 py-0.5 font-bold">STAGED</span>
+                        <div className="flex items-center gap-2">
+                          <button
+                            onClick={() => handleCopy(editedTwitter, 'Twitter Draft')}
+                            className="text-[10px] font-mono text-gray-500 hover:text-blue-600 bg-gray-100 hover:bg-blue-50 px-2 py-0.5 rounded transition-all cursor-pointer font-semibold"
+                          >
+                            Copy
+                          </button>
+                          <span className="text-[9px] font-mono bg-blue-50 text-blue-600 rounded px-1.5 py-0.5 font-bold">STAGED</span>
+                        </div>
                       </div>
-                      <p className="text-xs font-medium text-gray-800 leading-relaxed font-mono whitespace-pre-wrap bg-gray-50 border border-gray-100 rounded-lg p-3 flex-1">
-                        {outputs.gigi_content_drafts.twitter}
-                      </p>
+                      <textarea
+                        value={editedTwitter}
+                        onChange={(e) => setEditedTwitter(e.target.value)}
+                        disabled={isViewingHistory}
+                        className="w-full flex-1 min-h-[220px] p-3 text-xs font-medium text-gray-800 leading-relaxed font-mono bg-gray-50 border border-gray-100 focus:bg-white focus:border-blue-400 focus:ring-4 focus:ring-blue-100 rounded-lg outline-none resize-none transition-all disabled:opacity-75 disabled:cursor-not-allowed"
+                      />
                     </div>
 
                     {/* Changelog Card */}
                     <div className="bg-white border border-gray-200 rounded-xl p-5 flex flex-col gap-3" style={{ padding: '20px' }}>
                       <div className="flex justify-between items-center">
                         <span className="text-[10px] uppercase font-bold text-green-600 font-mono">Changelog Entry</span>
-                        <span className="text-[9px] font-mono bg-green-50 text-green-600 rounded px-1.5 py-0.5 font-bold">STAGED</span>
+                        <div className="flex items-center gap-2">
+                          <button
+                            onClick={() => handleCopy(editedChangelog, 'Changelog Entry')}
+                            className="text-[10px] font-mono text-gray-500 hover:text-green-600 bg-gray-100 hover:bg-green-50 px-2 py-0.5 rounded transition-all cursor-pointer font-semibold"
+                          >
+                            Copy
+                          </button>
+                          <span className="text-[9px] font-mono bg-green-50 text-green-600 rounded px-1.5 py-0.5 font-bold">STAGED</span>
+                        </div>
                       </div>
-                      <p className="text-xs font-medium text-gray-800 leading-relaxed font-mono whitespace-pre-wrap bg-gray-50 border border-gray-100 rounded-lg p-3 flex-1">
-                        {outputs.gigi_content_drafts.changelog}
-                      </p>
+                      <textarea
+                        value={editedChangelog}
+                        onChange={(e) => setEditedChangelog(e.target.value)}
+                        disabled={isViewingHistory}
+                        className="w-full flex-1 min-h-[220px] p-3 text-xs font-medium text-gray-800 leading-relaxed font-mono bg-gray-50 border border-gray-100 focus:bg-white focus:border-green-400 focus:ring-4 focus:ring-green-100 rounded-lg outline-none resize-none transition-all disabled:opacity-75 disabled:cursor-not-allowed"
+                      />
                     </div>
 
                     {/* Newsletter Card */}
                     <div className="bg-white border border-gray-200 rounded-xl p-5 flex flex-col gap-3" style={{ padding: '20px' }}>
                       <div className="flex justify-between items-center">
                         <span className="text-[10px] uppercase font-bold text-purple-600 font-mono">Newsletter Draft</span>
-                        <span className="text-[9px] font-mono bg-purple-50 text-purple-600 rounded px-1.5 py-0.5 font-bold">STAGED</span>
+                        <div className="flex items-center gap-2">
+                          <button
+                            onClick={() => handleCopy(editedNewsletter, 'Newsletter Draft')}
+                            className="text-[10px] font-mono text-gray-500 hover:text-purple-600 bg-gray-100 hover:bg-purple-50 px-2 py-0.5 rounded transition-all cursor-pointer font-semibold"
+                          >
+                            Copy
+                          </button>
+                          <span className="text-[9px] font-mono bg-purple-50 text-purple-600 rounded px-1.5 py-0.5 font-bold">STAGED</span>
+                        </div>
                       </div>
-                      <p className="text-xs font-medium text-gray-800 leading-relaxed font-mono whitespace-pre-wrap bg-gray-50 border border-gray-100 rounded-lg p-3 flex-1">
-                        {outputs.gigi_content_drafts.newsletter}
-                      </p>
+                      <textarea
+                        value={editedNewsletter}
+                        onChange={(e) => setEditedNewsletter(e.target.value)}
+                        disabled={isViewingHistory}
+                        className="w-full flex-1 min-h-[220px] p-3 text-xs font-medium text-gray-800 leading-relaxed font-mono bg-gray-50 border border-gray-100 focus:bg-white focus:border-purple-400 focus:ring-4 focus:ring-purple-100 rounded-lg outline-none resize-none transition-all disabled:opacity-75 disabled:cursor-not-allowed"
+                      />
                     </div>
 
                   </div>
@@ -1503,26 +1664,26 @@ export default function Dashboard() {
                     <div className="flex flex-col justify-between p-4 bg-gray-50 border border-gray-100 rounded-lg font-mono">
                       <div>
                         <span className="text-[9px] uppercase font-bold text-gray-400">Vinci Design Prompt</span>
-                        <p className="text-xs font-semibold text-gray-800 mt-2 leading-relaxed italic">
+                        <p className="text-xs font-medium text-gray-500 mt-2 leading-relaxed italic">
                           {outputs.vinci_image_prompt 
                             ? `"${outputs.vinci_image_prompt}"` 
                             : "Awaiting visual prompt generation..."}
                         </p>
                       </div>
-                      <div className="mt-4">
+                      {/* <div className="mt-4">
                         <span className="text-[9px] uppercase font-bold text-gray-400">Asset Storage ID</span>
                         <p className="text-[10px] text-gray-500 mt-1">
                           {outputs.vinci_image_url ? `Cloudinary Ref: ${outputs.vinci_image_url.split('/').pop()}` : "N/A"}
                         </p>
-                      </div>
+                      </div> */}
                     </div>
                     
-                    <div className="bg-[#0f172a] border border-[#1e293b] rounded-lg overflow-hidden flex items-center justify-center relative min-h-[200px]">
+                    <div className="rounded-lg overflow-hidden flex items-start justify-center relative min-h-[200px]">
                       {outputs.vinci_image_url ? (
                         <img 
                           src={outputs.vinci_image_url} 
                           alt="Vinci Generated Graphic Asset" 
-                          className="w-full h-full object-cover max-h-[300px]"
+                          className="w-full h-full object-contain max-h-[300px] rounded-lg border border-[#1e293b] "
                         />
                       ) : (
                         <div className="flex flex-col items-center justify-center p-6 text-center text-slate-400">
@@ -1612,7 +1773,7 @@ export default function Dashboard() {
                     ) : (
                       <button
                         onClick={handleShipCopy}
-                        disabled={shipping || outputs.approval_status !== 'APPROVED'}
+                        disabled={shipping || outputs.approval_status !== 'APPROVED' || isViewingHistory}
                         className="w-full text-xs font-bold bg-[#10b981] hover:bg-[#059669] text-white disabled:bg-gray-100 disabled:text-gray-400 disabled:border-gray-200 disabled:cursor-not-allowed transition-all text-center border border-transparent"
                         style={{ padding: '12px', borderRadius: '8px' }}
                       >
@@ -1702,7 +1863,59 @@ export default function Dashboard() {
                                   : 'bg-white border border-gray-200 text-gray-800 rounded-bl-none'
                               }`}
                             >
-                              {h.message}
+                              {isUser ? (
+                                h.message
+                              ) : (
+                                <div className="break-words max-w-full text-[11px] prose prose-sm prose-slate dark:prose-invert">
+                                  <ReactMarkdown
+                                    remarkPlugins={[remarkGfm]}
+                                    components={{
+                                      h1: ({ children }) => <h1 className="text-sm font-bold mt-2 mb-1 text-gray-950 font-sans">{children}</h1>,
+                                      h2: ({ children }) => <h2 className="text-xs font-bold mt-2 mb-1 text-gray-900 font-sans">{children}</h2>,
+                                      h3: ({ children }) => <h3 className="text-[11px] font-semibold mt-1 mb-1 text-gray-800 font-sans">{children}</h3>,
+                                      p: ({ children }) => <p className="text-[11px] leading-relaxed text-gray-800 mt-1 mb-1 last:mb-0">{children}</p>,
+                                      ul: ({ children }) => <ul className="list-disc list-outside space-y-0.5 mb-1.5 ml-3 pl-1 text-[11px] text-gray-800">{children}</ul>,
+                                      ol: ({ children }) => <ol className="list-decimal list-outside space-y-0.5 mb-1.5 ml-3 pl-1 text-[11px] text-gray-800">{children}</ol>,
+                                      li: ({ children }) => <li className="pl-0.5">{children}</li>,
+                                      blockquote: ({ children }) => (
+                                        <blockquote className="border-l-2 border-purple-300 bg-purple-50/50 pl-2 pr-1.5 py-1 my-1.5 rounded-r italic text-gray-600 text-[11px]">
+                                          {children}
+                                        </blockquote>
+                                      ),
+                                      code: ({ node, inline, className, children, ...props }: any) => {
+                                        const match = /language-(\w+)/.exec(className || '');
+                                        const isInline = inline ?? !match;
+                                        return isInline ? (
+                                          <code className="bg-gray-100 text-purple-600 font-mono text-[10px] px-1 py-0.5 rounded border border-gray-200/60">
+                                            {children}
+                                          </code>
+                                        ) : (
+                                          <div className="my-1.5 overflow-hidden rounded-lg bg-zinc-950 border border-white/10 w-full max-w-full overflow-x-auto">
+                                            <div className="flex items-center justify-between px-3 py-1 bg-zinc-900 border-b border-white/5 min-w-max">
+                                              <span className="text-[8px] text-zinc-400 uppercase tracking-widest font-bold font-mono">
+                                                {match ? match[1] : 'Code'}
+                                              </span>
+                                            </div>
+                                            <pre className="p-2.5 overflow-x-auto min-w-max">
+                                              <code className="font-mono text-[10px] leading-relaxed text-emerald-400" {...props}>
+                                                {children}
+                                              </code>
+                                            </pre>
+                                          </div>
+                                        );
+                                      },
+                                      a: ({ href, children }) => (
+                                        <a href={href} target="_blank" rel="noopener noreferrer" className="text-blue-600 underline underline-offset-2 hover:text-blue-800 transition-colors">
+                                          {children}
+                                        </a>
+                                      ),
+                                      strong: ({ children }) => <strong className="font-bold text-gray-950">{children}</strong>,
+                                    }}
+                                  >
+                                    {h.message}
+                                  </ReactMarkdown>
+                                </div>
+                              )}
                             </div>
                           </div>
                         );
@@ -1720,13 +1933,13 @@ export default function Dashboard() {
                       type="text" 
                       value={chatMessage}
                       onChange={(e) => setChatMessage(e.target.value)}
-                      placeholder="Ask Connie status..."
-                      disabled={sendingChat}
-                      className="flex-1 border border-gray-200 rounded-lg text-xs text-gray-800 focus:outline-none focus:border-blue-500 disabled:opacity-50 font-mono px-3.5 py-2.5"
+                      placeholder={isViewingHistory ? "Run history chat is read-only..." : "Ask Connie status..."}
+                      disabled={sendingChat || isViewingHistory}
+                      className="flex-1 border border-gray-200 rounded-lg text-xs text-gray-800 focus:outline-none focus:border-blue-500 disabled:opacity-50 disabled:bg-gray-50 font-mono px-3.5 py-2.5"
                     />
                     <button 
                       type="submit" 
-                      disabled={sendingChat || !chatMessage.trim()}
+                      disabled={sendingChat || !chatMessage.trim() || isViewingHistory}
                       className="bg-blue-600 hover:bg-blue-700 disabled:bg-gray-100 text-white disabled:text-gray-400 rounded-lg flex items-center justify-center shrink-0 w-9 h-9 transition-colors cursor-pointer"
                     >
                       {sendingChat ? (
@@ -1771,7 +1984,33 @@ export default function Dashboard() {
                           selectedNode.data.fields.map((f: any, idx: number) => (
                             <div key={idx} className="bg-white border border-gray-200 rounded-xl p-3 flex flex-col gap-1 shadow-sm">
                               <span className="text-[9px] uppercase font-bold text-gray-400 font-mono tracking-wider">{f.label}</span>
-                              <span className="text-xs text-gray-700 break-words font-mono leading-relaxed whitespace-pre-wrap">{f.value || 'None'}</span>
+                              <div className="text-xs text-gray-700 break-words font-mono leading-relaxed prose prose-sm prose-slate max-w-full">
+                                <ReactMarkdown
+                                  remarkPlugins={[remarkGfm]}
+                                  components={{
+                                    p: ({ children }) => <p className="mt-1 mb-1 last:mb-0 whitespace-pre-wrap">{children}</p>,
+                                    code: ({ node, inline, className, children, ...props }: any) => {
+                                      const match = /language-(\w+)/.exec(className || '');
+                                      const isInline = inline ?? !match;
+                                      return isInline ? (
+                                        <code className="bg-gray-100 text-purple-600 font-mono text-[10px] px-1 py-0.5 rounded border border-gray-200">
+                                          {children}
+                                        </code>
+                                      ) : (
+                                        <div className="my-1.5 overflow-hidden rounded-lg bg-zinc-950 border border-white/10 w-full max-w-full overflow-x-auto">
+                                          <pre className="p-2.5 overflow-x-auto min-w-max">
+                                            <code className="font-mono text-[10px] leading-relaxed text-emerald-400" {...props}>
+                                              {children}
+                                            </code>
+                                          </pre>
+                                        </div>
+                                      );
+                                    }
+                                  }}
+                                >
+                                  {f.value || 'None'}
+                                </ReactMarkdown>
+                              </div>
                             </div>
                           ))
                         ) : (

@@ -83,6 +83,31 @@ export async function POST(request: Request) {
       return NextResponse.json({ success: true, message: 'Recommendation approved and milestone added.', state });
     }
 
+    if (action === 'update_drafts') {
+      const { drafts } = body;
+      if (!drafts) {
+        return NextResponse.json({ error: 'Drafts object is required' }, { status: 400 });
+      }
+
+      if (!state.current_session || !state.current_session.agent_outputs) {
+        return NextResponse.json({ error: 'No active session output to update' }, { status: 400 });
+      }
+
+      state.current_session.agent_outputs.gigi_content_drafts = {
+        ...state.current_session.agent_outputs.gigi_content_drafts,
+        ...drafts
+      };
+
+      try {
+        state._id = "nexus_labs_brain";
+        await CompanyBrain.replaceOne({ _id: "nexus_labs_brain" }, state, { upsert: true });
+      } catch (err) {
+        console.error('[Approve API] Error saving state to MongoDB:', err);
+      }
+      await saveLocalFallback(dbPath, state);
+      return NextResponse.json({ success: true, message: 'Drafts updated successfully.', state });
+    }
+
     if (action === 'ship_marketing') {
       if (!state.current_session || !state.current_session.agent_outputs) {
         return NextResponse.json({ error: 'No active session output to ship' }, { status: 400 });

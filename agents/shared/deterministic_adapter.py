@@ -101,13 +101,41 @@ class DeterministicAgentAdapter(CrewAIAdapter):
         target_handle = HANDLE_MAPPING.get(self.original_agent_name, f"vicdevman/{self.original_agent_name}")
         logger.info(f"[{self.original_agent_name.upper()}] received message content: {content!r}, metadata: {msg.metadata!r}, target_handle: {target_handle!r}")
         
+        is_github_commit = "[github_commit]" in content.lower()
+
+        # If it is a new commit trigger, check if we need to initialize a new session in the DB
+        if is_github_commit:
+            try:
+                state = StateManager.load_state()
+                session = state.get("current_session", {})
+                approval_status = session.get("agent_outputs", {}).get("approval_status")
+                # If the current session is approved, shipped, or if the session is not PROCESSING,
+                # we initialize a new session. This also archives the old session to history.
+                if approval_status in ["APPROVED", "SHIPPED"] or session.get("status") != "PROCESSING":
+                    from datetime import datetime
+                    new_session_id = f"sess_{int(datetime.now().timestamp() * 1000)}"
+                    logger.info(f"[{self.original_agent_name.upper()}] Initializing fresh session from GITHUB_COMMIT message: {new_session_id}")
+                    StateManager.initialize_new_session(
+                        session_id=new_session_id,
+                        trigger_source="GITHUB_COMMIT",
+                        raw_inputs={
+                            "commit_message": content.split("\n")[0] if "\n" in content else content,
+                            "changed_files": []
+                        }
+                    )
+            except Exception as e:
+                logger.error(f"[{self.original_agent_name.upper()}] Error auto-initializing session from GITHUB_COMMIT: {e}")
+
         # 1. Pipeline Completion Guard
         if self.original_agent_name in ["devin_eng", "priscilla_product", "gigi_marketing"]:
             try:
                 state = StateManager.load_state()
                 session = state.get("current_session", {})
                 approval_status = session.get("agent_outputs", {}).get("approval_status")
-                if approval_status in ["APPROVED", "SHIPPED"]:
+                # If it's a new commit trigger, bypass the guard
+                if is_github_commit:
+                    logger.info(f"[{self.original_agent_name.upper()}] New commit trigger. Bypassing pipeline guard.")
+                elif approval_status in ["APPROVED", "SHIPPED"]:
                     logger.info(f"[{self.original_agent_name.upper()}] Pipeline is already {approval_status}. Skipping message.")
                     return
             except Exception as e:
@@ -139,7 +167,14 @@ class DeterministicAgentAdapter(CrewAIAdapter):
                 else:
                     msg_time = msg_time.astimezone(timezone.utc)
                 
-                if msg_time < session_time:
+                # Convert session_time to UTC timezone-aware
+                if session_time.tzinfo is None:
+                    session_time = session_time.replace(tzinfo=timezone.utc)
+                else:
+                    session_time = session_time.astimezone(timezone.utc)
+                
+                # Bypass timestamp check for new commit triggers to avoid clock drift issues
+                if not is_github_commit and msg_time < session_time:
                     logger.info(f"[{self.original_agent_name.upper()}] Skipping message from previous session. msg_time={msg_time}, session_time={session_time}")
                     return
         except Exception as e:
@@ -536,17 +571,30 @@ Changed Files: {changed_files}
                 state["evolutionary_feedback_loop"]["active_recommendations"] = []
                 
             state["evolutionary_feedback_loop"]["active_recommendations"].append(new_rec)
+            
+            # Also write to agent_outputs so the frontend can detect Marshall's completion
+            # independently of the evolutionary_feedback_loop path
+            if "agent_outputs" not in state.get("current_session", {}):
+                state.setdefault("current_session", {})["agent_outputs"] = {}
+            state["current_session"]["agent_outputs"]["marshall_recommendation"] = {
+                "summary": summary,
+                "rationale": rationale,
+                "strategic_impact_score": score,
+                "recommendation_id": recommendation_id
+            }
             StateManager.save_state(state)
             
-            # Notify Band Room
-            await tools.send_message(
-                f"vicdevman/priscilla I have completed the competitor research and generated a strategic recommendation:\n\n"
+            # Notify @vicdevman directly (like Connie) so the user sees it in Band room
+            message = (
+                f"🔍 **Marshall Research Complete**\n\n"
+                f"I've completed the competitor intelligence scan for the latest commit.\n\n"
+                f"**Strategic Recommendation:**\n"
                 f"Summary: {summary}\n"
                 f"Rationale: {rationale}\n"
-                f"Strategic Impact Score: {score}/10\n"
-                f"Staged in database with ID: {recommendation_id}",
-                ["@vicdevman/priscilla"]
+                f"Strategic Impact Score: {score}/10\n\n"
+                f"Staged in the evolutionary feedback loop with ID: {recommendation_id}"
             )
+            await tools.send_message(message, ["@vicdevman"])
 
         # Vinci Design: Extract prompt, call image generator, upload to Cloudinary, save in DB
         elif self.original_agent_name == "vinci_design":
@@ -586,6 +634,16 @@ Changed Files: {changed_files}
                     "Failed to generate campaign visual asset. Prompt is saved in database.",
                     ["@vicdevman"]
                 )
+            
+            # Set session status to COMPLETED
+            try:
+                state = StateManager.load_state()
+                if "current_session" in state:
+                    state["current_session"]["status"] = "COMPLETED"
+                    StateManager.save_state(state)
+                    logger.info(f"[VINCI_DESIGN] Session {session_id} marked as COMPLETED.")
+            except Exception as e:
+                logger.error(f"[VINCI_DESIGN] Failed to update session status to COMPLETED: {e}")
 
         # Connie Assistant: Update chat_history in state
         elif self.original_agent_name == "connie_assistant":
