@@ -69,7 +69,19 @@ export async function POST(request: Request) {
     const rawInputs = body.raw_inputs || {
       commit_message: body.commit_message || 'Manual Trigger Executed',
       changed_files: body.changed_files || [],
+      commit_sha: body.commit_sha || null,
+      commit_author: body.commit_author || null,
+      commit_url: body.commit_url || null,
+      diff_summary: body.diff_summary || null,
     };
+
+    // Also capture top-level body fields into rawInputs if not already set
+    if (!rawInputs.commit_message) rawInputs.commit_message = body.commit_message || 'Manual Trigger Executed';
+    if (!rawInputs.changed_files?.length) rawInputs.changed_files = body.changed_files || [];
+    if (body.commit_sha) rawInputs.commit_sha = body.commit_sha;
+    if (body.commit_author) rawInputs.commit_author = body.commit_author;
+    if (body.commit_url) rawInputs.commit_url = body.commit_url;
+    if (body.diff_summary) rawInputs.diff_summary = body.diff_summary;
 
     // Archive previous session to session_history if it exists
     if (state.current_session && state.current_session.session_id) {
@@ -84,6 +96,8 @@ export async function POST(request: Request) {
     }
 
     // Initialize the session state
+    const commitAuthorStr = rawInputs.commit_author ? ` by ${rawInputs.commit_author}` : '';
+    const commitShaStr = rawInputs.commit_sha ? ` (${rawInputs.commit_sha})` : '';
     state.current_session = {
       session_id: sessionId,
       created_at: new Date().toISOString(),
@@ -105,7 +119,7 @@ export async function POST(request: Request) {
         {
           id: 'welcome',
           sender: 'connie',
-          message: 'GitHub webhook triggered a new session! I am Connie, your Chief of Staff. Devin, Priscilla, and Gigi have entered the war room.',
+          message: `GitHub commit detected${commitAuthorStr}${commitShaStr}! Devin, Priscilla, Marshall, and Gigi have entered the war room to analyze: "${(rawInputs.commit_message || '').slice(0, 80)}"`,
           timestamp: new Date().toLocaleTimeString(),
         }
       ],
@@ -142,7 +156,11 @@ export async function POST(request: Request) {
       const url = `${restUrl.replace(/\/$/, '')}/api/v1/agent/chats/${state.room_id}/messages`;
       const commitMsg = rawInputs.commit_message || 'Manual Trigger Executed';
       const filesList = rawInputs.changed_files || [];
-      const content = `[GITHUB_COMMIT] New commit triggered:\nMessage: ${commitMsg}\nFiles: ${filesList.join(', ')}\n\n@vicdevman/devin please review.`;
+      const authorStr = rawInputs.commit_author ? `\nAuthor: ${rawInputs.commit_author}` : '';
+      const shaStr = rawInputs.commit_sha ? `\nSHA: ${rawInputs.commit_sha}` : '';
+      const urlStr = rawInputs.commit_url ? `\nURL: ${rawInputs.commit_url}` : '';
+      const diffStr = rawInputs.diff_summary ? `\n${rawInputs.diff_summary}` : '';
+      const content = `[GITHUB_COMMIT] New commit triggered:\nMessage: ${commitMsg}\nFiles: ${filesList.join(', ')}${authorStr}${shaStr}${urlStr}${diffStr}\n\n@vicdevman/devin please review.`;
 
       const bodyPayload = {
         message: {

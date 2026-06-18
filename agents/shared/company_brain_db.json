@@ -38,7 +38,8 @@
     "investor_pitch_deck_baseline": "Problem Landscape: Cloud-dependent note apps suffer massive data latency and expose proprietary intellectual property to third-party central database breaches.\nOur Core Solution: Nexus Labs processes AI intelligence local-first, sharding encrypted data arrays straight across user hardware.\nCurrent Traction Metric: Sub-10ms query syncing accomplished on localized test grids with zero data packets routed through central external platforms.",
     "pitch_deck_summary": "Problem Landscape: Cloud-dependent note apps suffer massive data latency and expose proprietary intellectual property to third-party central database breaches.\nOur Core Solution: Nexus Labs processes ",
     "active_milestones": [
-      "Launch real-time peer-to-peer syncing gateway"
+      "Launch real-time peer-to-peer syncing gateway",
+      "Implement highly visible offline-status indicators in UI."
     ],
     "epic_progress_percentages": {
       "Epic-P2P": 40,
@@ -47,29 +48,43 @@
     }
   },
   "current_session": {
-    "session_id": "sess_1781750717018",
-    "created_at": "2026-06-18T02:45:17.022Z",
+    "session_id": "sess_1781781233486",
+    "created_at": "2026-06-18T11:13:53.489Z",
     "trigger_source": "GITHUB_COMMIT",
     "status": "COMPLETED",
     "raw_inputs": {
-      "commit_message": "perf(db): implement connection pooling and redis caching layer",
+      "commit_message": "Feat: Implmented Mongo db, for web and agents, migrated from local json, to use mongo db for online sync in preparation for agnet deployment",
       "changed_files": [
-        "db.go",
-        "cache.go",
-        "main.go"
-      ]
+        "CURRENT-ROADMAP.MD",
+        "agents/pyproject.toml",
+        "agents/shared/company_brain_db.json",
+        "agents/shared/state_manager.py",
+        "agents/uv.lock",
+        "apps/web/package.json",
+        "apps/web/src/app/api/approve/route.ts",
+        "apps/web/src/app/api/brain/route.ts",
+        "apps/web/src/app/api/chat/route.ts",
+        "apps/web/src/app/api/webhook/route.ts",
+        "apps/web/src/app/page.tsx",
+        "apps/web/src/lib/mongodb.ts",
+        "pnpm-lock.yaml"
+      ],
+      "commit_sha": "3105cf2",
+      "commit_author": "vicdevmanx",
+      "commit_url": "https://github.com/vicdevman/shipstory/commit/3105cf2c40dca23890636e1c801cb261851babdb",
+      "diff_summary": "\n\nCode Diff (first 3 files):\n--- CURRENT-ROADMAP.MD\n@@ -207,7 +207,7 @@ The Company Brain is stored locally in `agents/shared/company_brain_db.json`.\n *   **Fix the Priscilla-Gigi Loop:** Update `deterministic_adapter.py` for Priscilla. When the post is approved, change the target mentions from `[\"@vicdevman/gigi\"]` to `[]` (empty list) or tag the user `@vicdevman` / Connie `@vicdevman/connie`. This stops the message loop.\n *   **Strengthen Timezon\n\n--- agents/pyproject.toml\n@@ -6,7 +6,11 @@ readme = \"README.md\"\n requires-python = \">=3.11\"\n dependencies = [\n     \"band-sdk[crewai]>=1.0.0\",\n+    \"dnspython\",\n+    \"pymongo\",\n     \"python-dotenv>=1.2.2\",\n+    \"litellm\",\n+    \"tiktoken\",\n ]\n \n [tool.uv]\n\n--- agents/shared/company_brain_db.json\n@@ -1,7 +1,10 @@\n {\n+  \"_id\": \"nexus_labs_brain\",\n   \"company_metadata\": {\n+    \"raw_brand_voice_constraints\": \"Company Name: Nexus Labs\\nValue Proposition: Local-first, AI-powered knowledge management app with sub-10ms peer-to-peer sync.\\nTarget Audience: Software engineers, developers, technical founders, productivity nerds.\\nVoice and Tone: Minimalist, authoritative, transparent, utility-focuse"
     },
     "agent_outputs": {
-      "devin_technical_summary": "The latest commit involves a significant improvement to our database performance by introducing connection pooling and a Redis caching layer. These changes are implemented in the files `db.go`, `cache.go`, and `main.go`. Connection pooling will enhance the efficiency and stability of database connections by reusing them, reducing overhead, and avoiding potential connection exhaustion. Meanwhile, the Redis caching layer will improve data retrieval speeds by storing frequently accessed data, resulting in faster response times. Overall, these enhancements aim to optimize our system's performance by ensuring faster and more reliable data access.",
+      "devin_technical_summary": "@vicdevman/devin: The recent commit, `Feat: Implmented Mongo db, for web and agents, migrated from local json, to use mongo db for online sync in preparation for agent deployment`, has introduced significant changes to our project. \n\nKey modifications include:\n1. **MongoDB Integration**: The project now uses MongoDB for online sync, replacing the local JSON database. This transition is evident in the updated `agents/shared/company_brain_db.json` and the introduction of MongoDB-related dependencies in `agents/pyproject.toml`.\n2. **Dependency Updates**: The `agents/pyproject.toml` file now includes dependencies such as `dnspython`, `pymongo`, `litellm`, and `tiktoken`, which are likely used for MongoDB interactions and potentially other functionalities.\n3. **CURRENT-ROADMAP.MD Modifications**: The `CURRENT-ROADMAP.MD` file has been updated, reflecting changes in the project's roadmap, possibly to accommodate the shift to MongoDB.\n4. **Multiple File Changes**: Various files across the `apps/web` directory have been modified, including `package.json`, `route.ts` files, and `mongodb.ts`, indicating a thorough adjustment of the application to work with MongoDB.\n\nThese changes are foundational for the project's transition towards using MongoDB for online synchronization and agent deployment. It's essential to review these modifications to ensure a smooth integration with the existing project structure and to address any potential issues that may arise from these changes. \n\nPlease let me know if you would like me to review anything else or if there are any specific questions regarding these updates.",
       "priscilla_importance_score": 8,
       "gigi_content_drafts": {
-        "twitter": "Boost your app's performance with our latest update! We've implemented connection pooling and a Redis caching layer to reduce latency and increase throughput. Say goodbye to slow load times and hello to a smoother user experience. 💻 🚀",
-        "changelog": "### Database Performance Enhancements\n\nWe've made significant improvements to our database performance with the implementation of connection pooling and a Redis caching layer. These updates aim to reduce latency, increase application throughput, and provide a smoother user experience.\n\n### What's Changed\n\n* Implemented connection pooling to optimize database interactions and reduce latency\n* Added a Redis caching layer to enhance data retrieval speeds and alleviate database load\n* Updated `db.go`, `cache.go`, and `main.go` to support these enhancements",
-        "newsletter": "### Introducing Faster Load Times and Improved Performance\n\nWe're excited to announce our latest update, focused on enhancing the performance of our database. By implementing connection pooling and a Redis caching layer, we've significantly reduced latency and increased application throughput.\n\nThese updates mean you can enjoy a smoother user experience, with faster load times and better resource management. Our team is dedicated to ongoing optimization efforts, ensuring that our tool continues to meet the evolving needs of developers and power note-takers.\n\nStay tuned for more updates, and thank you for being part of the Nexus Labs community!"
+        "twitter": "Nexus Labs now uses MongoDB for online sync, replacing local JSON databases. This change brings a more robust and scalable solution for our users. Learn more about the technical details behind this update. 🚀💻",
+        "changelog": "### MongoDB Integration for Online Sync\n\nWe've transitioned from using local JSON databases to MongoDB for online synchronization. This change introduces a more robust and scalable solution, allowing for smoother interactions and better data management.\n\n### What's Changed\n* Replaced local JSON database with MongoDB for online sync\n* Updated `agents/shared/company_brain_db.json` to reflect MongoDB integration\n* Introduced MongoDB-related dependencies in `agents/pyproject.toml`\n* Modified `CURRENT-ROADMAP.MD` to accommodate the shift to MongoDB\n* Updated various files in the `apps/web` directory, including `package.json`, `route.ts` files, and `mongodb.ts`, to work with MongoDB",
+        "newsletter": "### Introducing MongoDB for Online Sync\n\nWe're excited to announce that Nexus Labs has transitioned to using MongoDB for online synchronization. This change brings a more robust and scalable solution, allowing for smoother interactions and better data management.\n\nThe update includes the replacement of our local JSON database with MongoDB, as well as the introduction of MongoDB-related dependencies. Our team has also modified various files to ensure a seamless integration with the existing project structure.\n\nThis change is a significant step towards improving our users' experience, and we're committed to continuously delivering high-quality solutions. Stay tuned for more updates, and thank you for being part of the Nexus Labs community!"
       },
       "approval_status": "APPROVED",
-      "vinci_image_prompt": "Create a minimalist, technical illustration depicting two main concepts: \"connection pooling\" and \"Redis caching layer\". Use a clean schematic style with a focus on speed and performance improvements. \n\n1. Connection Pooling:\n   - Visualize a series of interconnected nodes or database icons, representing seamless and efficient data flow.\n   - Nodes should appear streamlined, symbolizing reduced overhead and increased stability.\n\n2. Redis Caching Layer:\n   - Depict a grid or network of quick-access storage blocks.\n   - Highlight speed and efficiency, possibly using abstract symbols like arrows or lightning bolts to suggest quick data retrieval.\n\nUse a color palette that is technical and professional—preferably blues, greys, and whites—to align with our developer-focused brand tone. Ensure the image looks clean and uncluttered for maximum impact.",
-      "vinci_image_url": "https://cdn.aimlapi.com/flamingo/files/b/0a9ebc72/gxHpYJk7r5eV_kVPEU0km_fIqlkAdB.png"
+      "vinci_image_prompt": "Create a minimalist schematic illustration reflecting a transition from local JSON databases to MongoDB for online synchronization. The visual should emphasize robustness and scalability, using a metaphor of interconnected nodes or circuits symbolizing seamless peer-to-peer data flow. Incorporate subtle elements of a database icon merging into a globe, showcasing global access and connectivity.\n\nPreferred Colors: Nexus Labs' brand palette with neutral tones.\nImagery Style: Flat, geometric shapes; clean lines; focus on symmetry.\nTypography: Integrate unobtrusive, modern, sans-serif text elements (if necessary) to label key components.\nOutput Format: SVG for scalable vector use.",
+      "vinci_image_url": "https://cdn.aimlapi.com/flamingo/files/b/0a9ec867/siKVZJL5NvQ8aMVtEyB9-_rgDWd3vp.png"
     },
     "rejections_and_memos": [
       {
@@ -81,32 +96,42 @@
       {
         "id": "welcome",
         "sender": "connie",
-        "message": "GitHub webhook triggered a new session! I am Connie, your Chief of Staff. Devin, Priscilla, and Gigi have entered the war room.",
-        "timestamp": "3:45:17 a.m."
+        "message": "GitHub commit detected by vicdevmanx (3105cf2)! Devin, Priscilla, Marshall, and Gigi have entered the war room to analyze: \"Feat: Implmented Mongo db, for web and agents, migrated from local json, to use \"",
+        "timestamp": "12:13:53 p.m."
       },
       {
-        "id": "msg_connie_1781750910106",
+        "id": "msg_connie_1781781511422",
         "sender": "connie",
-        "message": "Hello @vicdevman! Here's the current status of our roadmap:\n\n- **Active Milestones:**\n  - *Launch real-time peer-to-peer syncing gateway*\n\n- **Epic Progress:**\n  - *Epic-P2P:* 40%\n  - *Epic-Cache:* 90%\n  - *Epic-Auth:* 10%\n\nIf you have further questions or need specific details, feel free to ask! 🚀",
-        "timestamp": "03:48:30 AM"
+        "message": "Greetings @vicdevman. Here's the current status of Nexus Labs' roadmap:\n\n- **Active Milestones:**\n  - Launch real-time peer-to-peer syncing gateway\n  - Implement highly visible offline-status indicators in UI.\n\n- **Epic Progress:**\n  - Epic-P2P: 40%\n  - Epic-Cache: 90%\n  - Epic-Auth: 10%\n\nLet me know if you need further details on any specific aspect of our projects or updates. 🚀",
+        "timestamp": "12:18:31 PM"
       },
       {
-        "id": "msg_user_1781751800054",
+        "id": "msg_user_1781782627307",
         "sender": "user",
-        "message": "whats up with teh progress ?",
-        "timestamp": "4:03:20 a.m."
+        "message": "hey",
+        "timestamp": "12:37:07 p.m."
       },
       {
-        "id": "msg_connie_1781751807750",
+        "id": "msg_connie_1781782640657",
         "sender": "connie",
-        "message": "I'm currently monitoring the progress of active milestones. Here's an update on our epic progress:\n\n- Epic-P2P: 40%\n- Epic-Cache: 90%\n- Epic-Auth: 10%\n\nIf you need more specific details or have further questions, just let me know!",
-        "timestamp": "04:03:27 AM"
+        "message": "Hello! How can I assist you today?",
+        "timestamp": "12:37:20 PM"
       }
     ]
   },
   "evolutionary_feedback_loop": {
     "incoming_community_signals": [],
-    "active_recommendations": []
+    "active_recommendations": [
+      {
+        "recommendation_id": "rec_1781752255904",
+        "originator": "Marshall_Research_Agent",
+        "type": "ROADMAP_PIVOT",
+        "summary": "Implement highly visible offline-status indicators in UI.",
+        "rationale": "Competitor scan indicates users complain about sync transparency. Showing this prominently gives us a marketing edge.",
+        "strategic_impact_score": 8,
+        "audit_status": "APPROVED"
+      }
+    ]
   },
   "room_id": "e1944414-1368-4c23-8f86-71ced906606e",
   "session_history": [
@@ -184,6 +209,115 @@
           "sender": "connie",
           "message": "I'm here to assist with any questions you have regarding our current milestones or product features at Nexus Labs. Please let me know what specific information you're looking for, and I'll do my best to help!",
           "timestamp": "09:00:47 PM"
+        }
+      ]
+    },
+    {
+      "session_id": "sess_1781750717018",
+      "created_at": "2026-06-18T02:45:17.022Z",
+      "trigger_source": "GITHUB_COMMIT",
+      "status": "COMPLETED",
+      "raw_inputs": {
+        "commit_message": "perf(db): implement connection pooling and redis caching layer",
+        "changed_files": [
+          "db.go",
+          "cache.go",
+          "main.go"
+        ]
+      },
+      "agent_outputs": {
+        "devin_technical_summary": "The latest commit involves a significant improvement to our database performance by introducing connection pooling and a Redis caching layer. These changes are implemented in the files `db.go`, `cache.go`, and `main.go`. Connection pooling will enhance the efficiency and stability of database connections by reusing them, reducing overhead, and avoiding potential connection exhaustion. Meanwhile, the Redis caching layer will improve data retrieval speeds by storing frequently accessed data, resulting in faster response times. Overall, these enhancements aim to optimize our system's performance by ensuring faster and more reliable data access.",
+        "priscilla_importance_score": 8,
+        "gigi_content_drafts": {
+          "twitter": "Boost your app's performance with our latest update! We've implemented connection pooling and a Redis caching layer to reduce latency and increase throughput. Say goodbye to slow load times and hello to a smoother user experience. 💻 🚀",
+          "changelog": "### Database Performance Enhancements\n\nWe've made significant improvements to our database performance with the implementation of connection pooling and a Redis caching layer. These updates aim to reduce latency, increase application throughput, and provide a smoother user experience.\n\n### What's Changed\n\n* Implemented connection pooling to optimize database interactions and reduce latency\n* Added a Redis caching layer to enhance data retrieval speeds and alleviate database load\n* Updated `db.go`, `cache.go`, and `main.go` to support these enhancements",
+          "newsletter": "### Introducing Faster Load Times and Improved Performance\n\nWe're excited to announce our latest update, focused on enhancing the performance of our database. By implementing connection pooling and a Redis caching layer, we've significantly reduced latency and increased application throughput.\n\nThese updates mean you can enjoy a smoother user experience, with faster load times and better resource management. Our team is dedicated to ongoing optimization efforts, ensuring that our tool continues to meet the evolving needs of developers and power note-takers.\n\nStay tuned for more updates, and thank you for being part of the Nexus Labs community!"
+        },
+        "approval_status": "SHIPPED",
+        "vinci_image_prompt": "Create a minimalist, technical illustration depicting two main concepts: \"connection pooling\" and \"Redis caching layer\". Use a clean schematic style with a focus on speed and performance improvements. \n\n1. Connection Pooling:\n   - Visualize a series of interconnected nodes or database icons, representing seamless and efficient data flow.\n   - Nodes should appear streamlined, symbolizing reduced overhead and increased stability.\n\n2. Redis Caching Layer:\n   - Depict a grid or network of quick-access storage blocks.\n   - Highlight speed and efficiency, possibly using abstract symbols like arrows or lightning bolts to suggest quick data retrieval.\n\nUse a color palette that is technical and professional—preferably blues, greys, and whites—to align with our developer-focused brand tone. Ensure the image looks clean and uncluttered for maximum impact.",
+        "vinci_image_url": "https://cdn.aimlapi.com/flamingo/files/b/0a9ebc72/gxHpYJk7r5eV_kVPEU0km_fIqlkAdB.png",
+        "marshall_recommendation": {
+          "summary": "Implement highly visible offline-status indicators in UI.",
+          "rationale": "Competitor scan indicates users complain about sync transparency. Showing this prominently gives us a marketing edge.",
+          "strategic_impact_score": 8,
+          "recommendation_id": "rec_1781752255904"
+        }
+      },
+      "rejections_and_memos": [
+        {
+          "rejected_by": "Priscilla",
+          "reason": "Twitter draft violates guidelines: Contains 3 emojis (maximum allowed is 2)."
+        }
+      ],
+      "chat_history": [
+        {
+          "id": "welcome",
+          "sender": "connie",
+          "message": "GitHub webhook triggered a new session! I am Connie, your Chief of Staff. Devin, Priscilla, and Gigi have entered the war room.",
+          "timestamp": "3:45:17 a.m."
+        },
+        {
+          "id": "msg_connie_1781750910106",
+          "sender": "connie",
+          "message": "Hello @vicdevman! Here's the current status of our roadmap:\n\n- **Active Milestones:**\n  - *Launch real-time peer-to-peer syncing gateway*\n\n- **Epic Progress:**\n  - *Epic-P2P:* 40%\n  - *Epic-Cache:* 90%\n  - *Epic-Auth:* 10%\n\nIf you have further questions or need specific details, feel free to ask! 🚀",
+          "timestamp": "03:48:30 AM"
+        },
+        {
+          "id": "msg_user_1781751800054",
+          "sender": "user",
+          "message": "whats up with teh progress ?",
+          "timestamp": "4:03:20 a.m."
+        },
+        {
+          "id": "msg_connie_1781751807750",
+          "sender": "connie",
+          "message": "I'm currently monitoring the progress of active milestones. Here's an update on our epic progress:\n\n- Epic-P2P: 40%\n- Epic-Cache: 90%\n- Epic-Auth: 10%\n\nIf you need more specific details or have further questions, just let me know!",
+          "timestamp": "04:03:27 AM"
+        },
+        {
+          "id": "msg_user_1781752619805",
+          "sender": "user",
+          "message": "hey active now ?",
+          "timestamp": "3:16:59 AM"
+        },
+        {
+          "id": "msg_connie_timeout_1781752637165",
+          "sender": "connie",
+          "message": "I am currently processing requests on the Band network. Please check the Band room or try again in a moment.",
+          "timestamp": "3:17:17 AM"
+        }
+      ]
+    },
+    {
+      "session_id": "sess_1781776749201",
+      "created_at": "2026-06-18T09:59:09.201Z",
+      "trigger_source": "GITHUB_COMMIT",
+      "status": "IDLE",
+      "raw_inputs": {
+        "commit_message": "perf(db): implement connection pooling and redis caching layer",
+        "changed_files": [
+          "db.go",
+          "cache.go",
+          "main.go"
+        ]
+      },
+      "agent_outputs": {
+        "devin_technical_summary": null,
+        "priscilla_importance_score": null,
+        "gigi_content_drafts": {
+          "twitter": null,
+          "changelog": null,
+          "newsletter": null
+        },
+        "approval_status": "PENDING"
+      },
+      "rejections_and_memos": [],
+      "chat_history": [
+        {
+          "id": "welcome",
+          "sender": "connie",
+          "message": "GitHub webhook triggered a new session! I am Connie, your Chief of Staff. Devin, Priscilla, and Gigi have entered the war room.",
+          "timestamp": "9:59:09 AM"
         }
       ]
     }

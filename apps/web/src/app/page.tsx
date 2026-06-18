@@ -27,20 +27,28 @@ import {
   Code, 
   Zap, 
   FileText, 
-  Maximize2, 
   Grid, 
   Map, 
   Loader2,
   Sparkles,
   ArrowRight,
-  HelpCircle,
   Globe,
-  Settings,
-  Compass,
   Cpu,
   RefreshCw,
   Loader,
-  ArrowUp
+  ArrowUp,
+  GitBranch,
+  GitCommit,
+  Copy,
+  ExternalLink,
+  Terminal,
+  CheckCircle2,
+  AlertCircle,
+  ChevronUp,
+  Edit3,
+  Settings,
+  Building2,
+  Save
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -627,34 +635,79 @@ export default function Dashboard() {
   // Prevent NextJS Hydration mismatches
   const [mounted, setMounted] = useState(false);
 
+  // ── Toast notification system ──────────────────────────────────────────────
+  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
+  const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const showToast = useCallback((message: string, type: 'success' | 'error' = 'success') => {
+    if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+    setToast({ message, type });
+    toastTimerRef.current = setTimeout(() => setToast(null), 2500);
+  }, []);
+
+  // ── GitHub Commit Explorer state ────────────────────────────────────────────
+  const [showGitHubModal, setShowGitHubModal] = useState(false);
+  const [ghRepoUrl, setGhRepoUrl] = useState('');
+  const [ghToken, setGhToken] = useState('');
+  const [ghCommits, setGhCommits] = useState<any[]>([]);
+  const [loadingCommits, setLoadingCommits] = useState(false);
+  const [ghCommitsError, setGhCommitsError] = useState('');
+  // ── Modal tab: 'github' | 'brand' | 'custom'
+  const [modalTab, setModalTab] = useState<'github' | 'brand' | 'custom'>('github');
+  const [customCommitMsg, setCustomCommitMsg] = useState('');
+  const [customFiles, setCustomFiles] = useState('');
+
+  // ── Brand context editor state ──────────────────────────────────────────────
+  const [brandName, setBrandName] = useState('');
+  const [brandValueProp, setBrandValueProp] = useState('');
+  const [brandPersona, setBrandPersona] = useState('');
+  const [brandTone, setBrandTone] = useState('');
+  const [brandKeywords, setBrandKeywords] = useState('');
+  const [brandVoice, setBrandVoice] = useState('');
+  const [savingBrand, setSavingBrand] = useState(false);
+  const [brandSaved, setBrandSaved] = useState(false);
+
+  // Completion flash badge
+  const [showCompleteBadge, setShowCompleteBadge] = useState(false);
+  const prevStatus = useRef<string>('');
+
   useEffect(() => {
     setMounted(true);
   }, []);
 
   // Poll state every 1.5 seconds
-  const fetchState = async () => {
+  const fetchState = useCallback(async () => {
     try {
       const res = await fetch('/api/brain');
       if (!res.ok) {
         throw new Error(`API returned ${res.status}`);
       }
       const data = await res.json();
-      setState(data);
+      setState((prev: any) => {
+        // Detect PROCESSING → COMPLETED transition and show flash badge
+        const newStatus = data?.current_session?.status;
+        const oldStatus = prev?.current_session?.status;
+        if (oldStatus === 'PROCESSING' && newStatus === 'COMPLETED') {
+          setShowCompleteBadge(true);
+          setTimeout(() => setShowCompleteBadge(false), 4000);
+        }
+        return data;
+      });
       setLoading(false);
     } catch (err) {
       console.error('Error fetching brain state:', err);
     }
-  };
+  }, []);
 
   useEffect(() => {
     fetchState();
     const interval = setInterval(fetchState, 1500);
     return () => clearInterval(interval);
-  }, []);
+  }, [fetchState]);
 
   // Auto-scroll chat box
   useEffect(() => {
-    // chatBottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+    chatBottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [state?.current_session?.chat_history]);
 
   // Determine active session dynamically
@@ -706,14 +759,180 @@ export default function Dashboard() {
     }
   };
 
-  // Copy helper
-  const handleCopy = async (text: string, label: string) => {
+  // Copy helper — with toast feedback
+  const handleCopy = useCallback(async (text: string, label: string) => {
     try {
       await navigator.clipboard.writeText(text);
+      showToast(`✓ ${label} copied to clipboard!`);
     } catch (err) {
       console.error('Failed to copy: ', err);
+      showToast('Failed to copy to clipboard', 'error');
     }
-  };
+  }, [showToast]);
+
+  // ── GitHub Commit History Loader ─────────────────────────────────────────────
+  const loadGitHubCommits = useCallback(async () => {
+    const url = ghRepoUrl.trim();
+    if (!url) { setGhCommitsError('Please enter a GitHub repository URL.'); return; }
+
+    // Parse owner/repo from various URL formats
+    const match = url.match(/github\.com[/:]([\.\w-]+)\/([\w.-]+?)(?:\.git)?(?:\/.*)?$/);
+    if (!match) { setGhCommitsError('Invalid GitHub URL. Use: github.com/owner/repo'); return; }
+    const [, owner, repo] = match;
+
+    setLoadingCommits(true);
+    setGhCommitsError('');
+    setGhCommits([]);
+
+    try {
+      const headers: Record<string, string> = { Accept: 'application/vnd.github.v3+json' };
+      if (ghToken.trim()) headers['Authorization'] = `Bearer ${ghToken.trim()}`;
+
+      const res = await fetch(`https://api.github.com/repos/${owner}/${repo}/commits?per_page=10`, { headers });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        setGhCommitsError(err.message || `GitHub API error: ${res.status}`);
+        return;
+      }
+      const commits = await res.json();
+      setGhCommits(commits);
+    } catch (e: any) {
+      setGhCommitsError('Network error reaching GitHub API. Check your connection.');
+    } finally {
+      setLoadingCommits(false);
+    }
+  }, [ghRepoUrl, ghToken]);
+
+  const triggerWithGitHubCommit = useCallback(async (commit: any) => {
+    setShowGitHubModal(false);
+    setSelectedSessionId(null);
+    setTriggering(true);
+    try {
+      // Fetch the detailed commit for file list
+      const headers: Record<string, string> = { Accept: 'application/vnd.github.v3+json' };
+      if (ghToken.trim()) headers['Authorization'] = `Bearer ${ghToken.trim()}`;
+
+      let changedFiles: string[] = [];
+      let diffSummary = '';
+      try {
+        const detail = await fetch(commit.url, { headers });
+        if (detail.ok) {
+          const d = await detail.json();
+          changedFiles = (d.files || []).map((f: any) => f.filename);
+          // Provide first 1500 chars of patches to Devin for richer analysis
+          const patches = (d.files || []).slice(0, 3).map((f: any) => {
+            const patch = f.patch ? f.patch.slice(0, 400) : '';
+            return patch ? `--- ${f.filename}\n${patch}` : '';
+          }).filter(Boolean).join('\n\n');
+          if (patches) diffSummary = `\n\nCode Diff (first 3 files):\n${patches}`;
+        }
+      } catch (_) {}
+
+      await fetch('/api/webhook', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          source: 'GITHUB_COMMIT',
+          commit_message: commit.commit.message,
+          changed_files: changedFiles.length > 0 ? changedFiles : ['unknown'],
+          commit_sha: commit.sha?.slice(0, 7),
+          commit_author: commit.commit?.author?.name || 'Unknown',
+          commit_url: commit.html_url,
+          diff_summary: diffSummary,
+        }),
+      });
+      await fetchState();
+    } catch (err) {
+      console.error('Error triggering from GitHub commit:', err);
+      showToast('Failed to trigger pipeline', 'error');
+    } finally {
+      setTriggering(false);
+    }
+  }, [ghToken, fetchState, showToast]);
+
+  const triggerWithCustomCommit = useCallback(async () => {
+    if (!customCommitMsg.trim()) { showToast('Please enter a commit message', 'error'); return; }
+    setShowGitHubModal(false);
+    setModalTab('github'); // reset for next open
+    setSelectedSessionId(null);
+    setTriggering(true);
+    try {
+      const files = customFiles.split(',').map(f => f.trim()).filter(Boolean);
+      await fetch('/api/webhook', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          source: 'GITHUB_COMMIT',
+          commit_message: customCommitMsg.trim(),
+          changed_files: files.length > 0 ? files : ['unknown'],
+        }),
+      });
+      await fetchState();
+    } catch (err) {
+      console.error('Error triggering custom commit:', err);
+      showToast('Failed to trigger pipeline', 'error');
+    } finally {
+      setTriggering(false);
+    }
+  }, [customCommitMsg, customFiles, fetchState, showToast]);
+
+  // ── Brand context: load from /api/settings ────────────────────────────────
+  const loadBrandContext = useCallback(async () => {
+    try {
+      const res = await fetch('/api/settings');
+      if (!res.ok) return;
+      const data = await res.json();
+      const cm = data.company_metadata || {};
+      const oa = data.operational_assets || {};
+      setBrandName(cm.name || '');
+      setBrandValueProp(cm.value_proposition || '');
+      setBrandPersona(cm.target_persona || '');
+      setBrandTone(cm.style_guide?.tone || '');
+      setBrandKeywords((cm.security_filters?.restricted_keywords || []).join(', '));
+      setBrandVoice(cm.raw_brand_voice_constraints || '');
+    } catch (err) {
+      console.error('[Brand] Failed to load brand context:', err);
+    }
+  }, []);
+
+  // Load brand when modal opens
+  useEffect(() => {
+    if (showGitHubModal) loadBrandContext();
+  }, [showGitHubModal, loadBrandContext]);
+
+  // ── Brand context: save to /api/settings ──────────────────────────────────
+  const saveBrandContext = useCallback(async () => {
+    setSavingBrand(true);
+    setBrandSaved(false);
+    try {
+      const res = await fetch('/api/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'update_brand',
+          name: brandName.trim(),
+          value_proposition: brandValueProp.trim(),
+          target_persona: brandPersona.trim(),
+          tone: brandTone.trim(),
+          restricted_keywords: brandKeywords,
+          raw_brand_voice_constraints: brandVoice.trim(),
+        }),
+      });
+      if (res.ok) {
+        setBrandSaved(true);
+        await fetchState(); // refresh header name instantly
+        setTimeout(() => setBrandSaved(false), 3000);
+        showToast(`\u2713 Brand context saved for "${brandName.trim() || 'startup'}"`);
+      } else {
+        showToast('Failed to save brand context', 'error');
+      }
+    } catch (err) {
+      showToast('Failed to save brand context', 'error');
+    } finally {
+      setSavingBrand(false);
+    }
+  }, [brandName, brandValueProp, brandPersona, brandTone, brandKeywords, brandVoice, fetchState, showToast]);
+
 
   // Publish helper
   const handlePublishCampaign = async () => {
@@ -746,10 +965,14 @@ export default function Dashboard() {
         // 1. Webhook Trigger Node
         if (node.id === 'trigger') {
           nodeStatus = status === 'PROCESSING' ? 'running' : 'success';
+          const inp = session.raw_inputs || {};
           fields = [
             { label: 'Source', value: session.trigger_source || 'MANUAL' },
-            { label: 'Message', value: session.raw_inputs?.commit_message || 'No commits' },
-            { label: 'Files', value: session.raw_inputs?.changed_files?.join(', ') || 'None' }
+            { label: 'Commit', value: inp.commit_message || 'No commits' },
+            { label: 'Author', value: inp.commit_author || null },
+            { label: 'SHA', value: inp.commit_sha || null },
+            { label: 'Files Changed', value: inp.changed_files?.join(', ') || 'None' },
+            { label: 'GitHub URL', value: inp.commit_url || null },
           ];
         }
 
@@ -1018,12 +1241,12 @@ export default function Dashboard() {
     setIsRightSidebarOpen(true);
   }, []);
 
-  // Webhook manual trigger
-  const handleSimulateWebhook = async () => {
-    setSelectedSessionId(null); // Reset history view to active
+  // Webhook manual trigger (legacy fallback — modal preferred)
+  const handleSimulateWebhook = useCallback(async () => {
+    setSelectedSessionId(null);
     setTriggering(true);
     try {
-      const res = await fetch('/api/webhook', {
+      await fetch('/api/webhook', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -1038,7 +1261,7 @@ export default function Dashboard() {
     } finally {
       setTriggering(false);
     }
-  };
+  }, [fetchState]);
 
   // Strategic roadmap pivot approval
   const handleApproveRec = async (recId: string) => {
@@ -1161,7 +1384,7 @@ export default function Dashboard() {
           {/* Run History Selector Dropdown */}
           {state.session_history && state.session_history.length > 0 && (
             <div className="flex items-center gap-1.5 bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 shadow-xs">
-              <span className="text-[10px] font-bold font-mono text-gray-500 uppercase">Run History:</span>
+              <span className="text-[10px] font-bold font-mono text-gray-500 uppercase">History:</span>
               <select
                 value={selectedSessionId || state.current_session?.session_id || ''}
                 onChange={(e) => {
@@ -1196,18 +1419,28 @@ export default function Dashboard() {
             <span>{isRightSidebarOpen ? 'Hide Assistant' : 'Show Assistant'}</span>
           </button>
           
+          {/* Completion flash badge */}
+          {showCompleteBadge && (
+            <div className="flex items-center gap-1.5 bg-emerald-500/10 text-emerald-600 text-xs rounded-full border border-emerald-500/20 font-bold px-3 py-1 font-mono animate-pulse">
+              <CheckCircle2 className="w-3.5 h-3.5" />
+              Pipeline Complete!
+            </div>
+          )}
+
+          {/* GitHub Commit Explorer Button */}
           <button
-            onClick={handleSimulateWebhook}
-            disabled={triggering || state.current_session?.status === 'PROCESSING'}
-            className="flex items-center gap-1.5 h-9 bg-blue-600 text-white hover:bg-blue-700 disabled:bg-blue-400 disabled:cursor-not-allowed font-semibold text-xs transition-colors"
+            onClick={() => setShowGitHubModal(true)}
+            disabled={triggering || state.current_session?.status == 'PROCESSING'}
+            className="flex items-center gap-2 h-9 bg-blue-500 text-white hover:bg-blue-400 cursor-pointer disabled:bg-blue-300 disabled:cursor-not-allowed font-semibold text-xs transition-all duration-200 border border-blue-500"
             style={{ padding: '8px 16px', borderRadius: '8px' }}
+            title="Analyze a GitHub commit — load from any repo or enter a custom commit"
           >
             {triggering ? (
               <Loader2 className="w-3.5 h-3.5 animate-spin" />
             ) : (
-              <Play className="w-3.5 h-3.5 fill-current" />
+              <GitBranch className="w-3.5 h-3.5" />
             )}
-            {session.status === 'PROCESSING' ? 'Agents Debating...' : 'Simulate GitHub Push'}
+            {state.current_session?.status === 'PROCESSING' ? 'Agents Running...' : triggering ? 'Starting...' : 'Analyze Commit'}
           </button>
         </div>
       </header>
@@ -1222,7 +1455,7 @@ export default function Dashboard() {
           }`}
         >
           {/* Collapse/Expand Sidebar Toggle */}
-          <div className="flex h-12 items-center justify-end px-3 border-b border-[#1e1e24] shrink-0">
+          <div className="flex h-12 items-center justify-end px-2 border-b border-[#1e1e24] shrink-0">
             <button 
               onClick={() => setIsSidebarOpen(!isSidebarOpen)} 
               className="p-1.5 rounded text-gray-500 hover:text-white hover:bg-[#1A1A1E]"
@@ -1232,7 +1465,7 @@ export default function Dashboard() {
           </div>
 
           {isSidebarOpen ? (
-            <div className="flex-1 overflow-y-auto flex flex-col gap-5 p-3.5">
+            <div className="flex-1 overflow-y-auto flex flex-col gap-3 p-3.5">
               
               {/* NAVIGATION / VIEWS Section */}
               <div className="flex flex-col gap-1">
@@ -1245,7 +1478,7 @@ export default function Dashboard() {
                 </div>
 
                 {openSidebarSections.navigation && (
-                  <div className="flex flex-col gap-1 mt-1 pl-1">
+                  <div className="flex flex-col gap-1 mt-1 px-3">
                     <button
                       onClick={() => setView('canvas')}
                       className={`flex items-center gap-2.5 w-full text-left rounded-lg text-xs font-semibold px-3 py-2 transition-colors hover:bg-[#1A1A1E] ${
@@ -1354,7 +1587,7 @@ export default function Dashboard() {
             </div>
           ) : (
             // Collapsed rail display
-            <div className="flex-1 flex flex-col items-center gap-5 pt-5">
+            <div className="flex-1 flex flex-col items-center gap-3 pt-5">
               <button onClick={() => setView('canvas')} title="Workflow Canvas" className={`p-1.5 rounded hover:bg-[#1A1A1E] ${view === 'canvas' ? 'text-blue-500' : ''}`}><Globe className="w-5 h-5" /></button>
               <button onClick={() => setView('startup')} title="Startup Details" className={`p-1.5 rounded hover:bg-[#1A1A1E] ${view === 'startup' ? 'text-blue-500' : ''}`}><Cpu className="w-5 h-5" /></button>
               <button onClick={() => setView('outputs')} title="Campaign Outputs" className={`p-1.5 rounded hover:bg-[#1A1A1E] ${view === 'outputs' ? 'text-blue-500' : ''}`}><FileText className="w-5 h-5" /></button>
@@ -1435,7 +1668,7 @@ export default function Dashboard() {
               </div>
 
               {/* Identity & Pitch profile cards */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                 <div className="bg-white border border-gray-200 rounded-xl p-5" style={{ padding: '20px' }}>
                   <span className="text-[10px] uppercase font-bold text-blue-600 font-mono tracking-widest">Startup Identity</span>
                   <h3 className="text-lg font-bold text-gray-900 mt-1">{metadata.name || 'Nexus Labs'}</h3>
@@ -1458,7 +1691,7 @@ export default function Dashboard() {
               </div>
 
               {/* Milestones & Progress */}
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                 
                 {/* Active Milestones list */}
                 <div className="md:col-span-2 bg-white border border-gray-200 rounded-xl p-5" style={{ padding: '20px' }}>
@@ -1508,7 +1741,7 @@ export default function Dashboard() {
               <div className="bg-white border border-gray-200 rounded-xl p-5" style={{ padding: '20px' }}>
                 <span className="text-[10px] uppercase font-bold text-red-600 font-mono tracking-widest">Brand Voice Style Guide & Safety Rules</span>
                 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-5 mt-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-4">
                   <div className="flex flex-col gap-2">
                     <span className="text-[9px] uppercase font-bold text-gray-400 font-mono">Writing Restrictions</span>
                     <ul className="list-disc list-inside text-xs font-mono text-gray-700 flex flex-col gap-1">
@@ -1576,7 +1809,7 @@ export default function Dashboard() {
               </div>
 
               {/* Marketing Copy Stage Cards */}
-              <div className="flex flex-col gap-5">
+              <div className="flex flex-col gap-3">
                 <span className="text-[10px] uppercase font-bold text-green-600 font-mono tracking-widest">Staged Copy drafts</span>
                 
                 {outputs.gigi_content_drafts && outputs.gigi_content_drafts.twitter ? (
@@ -1660,7 +1893,7 @@ export default function Dashboard() {
               {outputs.gigi_content_drafts && outputs.gigi_content_drafts.twitter && (
                 <div className="bg-white border border-gray-200 rounded-xl p-5" style={{ padding: '20px' }}>
                   <span className="text-[10px] uppercase font-bold text-pink-600 font-mono tracking-widest">Vinci Graphic Asset Campaign Design</span>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-5 mt-3">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-3">
                     <div className="flex flex-col justify-between p-4 bg-gray-50 border border-gray-100 rounded-lg font-mono">
                       <div>
                         <span className="text-[9px] uppercase font-bold text-gray-400">Vinci Design Prompt</span>
@@ -1709,7 +1942,7 @@ export default function Dashboard() {
               )}
 
               {/* Delivery Actions & Recommendations */}
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                 
                 {/* Strategic Pivots list */}
                 <div className="md:col-span-2 bg-white border border-gray-200 rounded-xl p-5" style={{ padding: '20px' }}>
@@ -1720,15 +1953,15 @@ export default function Dashboard() {
                       feedback.active_recommendations.map((rec: any, idx: number) => (
                         <div 
                           key={idx}
-                          className="bg-gray-50 border border-gray-100 rounded-lg p-3 flex flex-col md:flex-row md:items-center justify-between gap-3 font-mono"
+                          className="bg-gray-50 border border-gray-100 rounded-lg p-3 flex flex-col justify-start items-start gap-3 font-mono"
                         >
                           <div className="flex-1">
-                            <span className="text-[9px] font-bold uppercase tracking-wider text-purple-600 bg-purple-50 rounded px-1.5 py-0.5">ROADMAP_PIVOT</span>
+                            {/* <span className="text-[9px] font-bold uppercase tracking-wider text-purple-600 bg-purple-50 rounded px-1.5 py-0.5">ROADMAP_PIVOT</span> */}
                             <h4 className="text-xs font-bold text-gray-900 mt-1">{rec.summary}</h4>
                             <p className="text-[10px] text-gray-500 mt-0.5 leading-relaxed">{rec.rationale}</p>
                           </div>
 
-                          <div className="flex items-center gap-3 self-end md:self-center">
+                          <div className="flex items-center gap-3 self-end">
                             <span className="text-[10px] font-bold text-purple-700">Impact: {rec.strategic_impact_score}/10</span>
                             {rec.audit_status === 'APPROVED' ? (
                               <span className="text-[10px] font-bold text-green-600 flex items-center gap-0.5">
@@ -2062,6 +2295,379 @@ export default function Dashboard() {
         </section>
 
       </div>
+
+      {/* ── Toast Notification ───────────────────────────────────────────────── */}
+      {toast && (
+        <div
+          className={`fixed bottom-6 left-1/2 -translate-x-1/2 z-[9999] flex items-center gap-2.5 px-5 py-3 rounded-xl shadow-2xl border font-mono text-sm font-semibold transition-all duration-300 animate-in fade-in slide-in-from-bottom-4 ${
+            toast.type === 'error'
+              ? 'bg-red-950 border-red-700 text-red-200'
+              : 'bg-gray-950 border-gray-700 text-white'
+          }`}
+          style={{ minWidth: 220, textAlign: 'center' }}
+        >
+          {toast.type === 'error' ? (
+            <AlertCircle className="w-4 h-4 text-red-400 shrink-0" />
+          ) : (
+            <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+          )}
+          {toast.message}
+        </div>
+      )}
+
+      {/* ── GitHub Commit Explorer Modal ─────────────────────────────────────── */}
+      {showGitHubModal && (
+        <div
+          className="fixed inset-0 z-[1000] flex items-end justify-center sm:items-center"
+          style={{ background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(4px)' }}
+          onClick={(e) => { if (e.target === e.currentTarget) setShowGitHubModal(false); }}
+        >
+          <div className="w-full max-w-2xl max-h-[90vh] bg-[#0D0D10] border border-[#1e1e28] rounded-2xl shadow-2xl flex flex-col overflow-hidden" style={{ margin: '0 16px' }}>
+            {/* Modal Header */}
+            <div className="flex items-center justify-between px-6 py-4 border-b border-[#1e1e28] shrink-0">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-lg bg-gray-800 border border-gray-700 flex items-center justify-center">
+                  <GitBranch className="w-4 h-4 text-white" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-white font-mono">GitHub Commit Explorer</h3>
+                  <p className="text-[10px] text-gray-400 font-mono">Load any public repo or enter a custom commit to trigger the agent pipeline</p>
+                </div>
+              </div>
+              <button onClick={() => setShowGitHubModal(false)} className="p-1.5 rounded text-gray-500 hover:text-white hover:bg-gray-800 transition-colors">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Mode tabs — 3 tabs */}
+            <div className="flex gap-0 border-b border-[#1e1e28] shrink-0">
+              <button
+                onClick={() => setModalTab('github')}
+                className={`flex items-center gap-1.5 px-5 py-3 text-xs font-bold font-mono border-b-2 transition-colors ${
+                  modalTab === 'github' ? 'border-blue-500 text-blue-400' : 'border-transparent text-gray-500 hover:text-gray-300'
+                }`}
+              >
+                <GitCommit className="w-3.5 h-3.5" />
+                GitHub Repo
+              </button>
+              <button
+                onClick={() => setModalTab('brand')}
+                className={`flex items-center gap-1.5 px-5 py-3 text-xs font-bold font-mono border-b-2 transition-colors ${
+                  modalTab === 'brand' ? 'border-amber-500 text-amber-400' : 'border-transparent text-gray-500 hover:text-gray-300'
+                }`}
+              >
+                <Building2 className="w-3.5 h-3.5" />
+                Brand Context
+                {brandName && <span className="ml-1.5 text-[9px] bg-amber-500/20 text-amber-400 rounded px-1.5 py-0.5 font-mono">{brandName.slice(0, 12)}{brandName.length > 12 ? '…' : ''}</span>}
+              </button>
+              <button
+                onClick={() => setModalTab('custom')}
+                className={`flex items-center gap-1.5 px-5 py-3 text-xs font-bold font-mono border-b-2 transition-colors ${
+                  modalTab === 'custom' ? 'border-purple-500 text-purple-400' : 'border-transparent text-gray-500 hover:text-gray-300'
+                }`}
+              >
+                <Edit3 className="w-3.5 h-3.5" />
+                Custom Commit
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div className="flex-1 overflow-y-auto p-6 flex flex-col gap-5">
+
+              {/* --- GITHUB REPO MODE --- */}
+              {modalTab === 'github' && (
+                <>
+                  {/* Repo URL Input */}
+                  <div className="flex flex-col gap-2">
+                    <label className="text-[10px] font-bold uppercase tracking-wider text-gray-400 font-mono">Repository URL</label>
+                    <div className="flex gap-2">
+                      <input
+                        type="text"
+                        value={ghRepoUrl}
+                        onChange={(e) => setGhRepoUrl(e.target.value)}
+                        onKeyDown={(e) => e.key === 'Enter' && loadGitHubCommits()}
+                        placeholder="https://github.com/owner/repo"
+                        className="flex-1 bg-[#111116] border border-[#2a2a35] rounded-lg px-4 py-2.5 text-sm text-white font-mono placeholder-gray-600 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500/40 transition-colors"
+                      />
+                      <button
+                        onClick={loadGitHubCommits}
+                        disabled={loadingCommits}
+                        className="flex items-center gap-1.5 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-800 disabled:cursor-not-allowed text-white text-xs font-bold px-4 py-2.5 rounded-lg transition-colors shrink-0"
+                      >
+                        {loadingCommits ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
+                        {loadingCommits ? 'Loading...' : 'Load Commits'}
+                      </button>
+                    </div>
+                    {/* Optional GitHub token */}
+                    <input
+                      type="password"
+                      value={ghToken}
+                      onChange={(e) => setGhToken(e.target.value)}
+                      placeholder="GitHub Personal Access Token (optional — increases rate limits)"
+                      className="bg-[#111116] border border-[#2a2a35] rounded-lg px-4 py-2 text-xs text-gray-300 font-mono placeholder-gray-600 focus:outline-none focus:border-gray-500 transition-colors"
+                    />
+                  </div>
+
+                  {/* Brand-to-repo association indicator */}
+                  {brandName && (
+                    <div className="flex items-center justify-between px-3.5 py-2.5 bg-amber-950/30 border border-amber-800/30 rounded-xl">
+                      <div className="flex items-center gap-2">
+                        <Building2 className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                        <span className="text-[11px] font-mono text-amber-200">
+                          Commits will be analyzed using <strong className="text-amber-100">{brandName}</strong> brand guidelines
+                        </span>
+                      </div>
+                      <button
+                        onClick={() => setModalTab('brand')}
+                        className="text-[10px] font-bold font-mono text-amber-400 hover:text-amber-200 transition-colors ml-2 shrink-0"
+                      >
+                        Edit →
+                      </button>
+                    </div>
+                  )}
+
+                  {/* Error state */}
+                  {ghCommitsError && (
+                    <div className="flex items-center gap-2 p-3 bg-red-950/50 border border-red-800/50 rounded-lg">
+                      <AlertCircle className="w-4 h-4 text-red-400 shrink-0" />
+                      <span className="text-xs text-red-300 font-mono">{ghCommitsError}</span>
+                    </div>
+                  )}
+
+                  {/* Commit List */}
+                  {ghCommits.length > 0 && (
+                    <div className="flex flex-col gap-2">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[10px] font-bold uppercase tracking-wider text-gray-400 font-mono">Recent Commits — click to analyze</span>
+                        <span className="text-[10px] font-mono text-gray-600">{ghCommits.length} commits loaded</span>
+                      </div>
+                      <div className="flex flex-col gap-1.5">
+                        {ghCommits.map((commit: any, idx: number) => (
+                          <button
+                            key={commit.sha}
+                            onClick={() => triggerWithGitHubCommit(commit)}
+                            className="group w-full flex items-start gap-3 p-3.5 rounded-xl bg-[#111116] border border-[#1e1e28] hover:border-blue-500/50 hover:bg-[#13131a] text-left transition-all duration-150"
+                          >
+                            <div className="shrink-0 w-6 h-6 rounded-md bg-gray-800 flex items-center justify-center mt-0.5">
+                              <GitCommit className="w-3 h-3 text-gray-400 group-hover:text-blue-400 transition-colors" />
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <p className="text-xs font-semibold text-gray-100 font-mono leading-snug truncate group-hover:text-white">
+                                {commit.commit.message.split('\n')[0]}
+                              </p>
+                              <div className="flex items-center gap-3 mt-1">
+                                <span className="text-[10px] text-gray-500 font-mono">{commit.sha?.slice(0, 7)}</span>
+                                <span className="text-[10px] text-gray-500 font-mono">{commit.commit?.author?.name}</span>
+                                <span className="text-[10px] text-gray-500 font-mono">
+                                  {commit.commit?.author?.date ? new Date(commit.commit.author.date).toLocaleDateString() : ''}
+                                </span>
+                              </div>
+                            </div>
+                            <div className="shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
+                              <span className="text-[10px] font-bold text-blue-400 font-mono bg-blue-500/10 rounded px-2 py-1">Analyze →</span>
+                            </div>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Empty prompt */}
+                  {ghCommits.length === 0 && !ghCommitsError && !loadingCommits && (
+                    <div className="flex flex-col items-center justify-center py-10 text-center">
+                      <GitBranch className="w-10 h-10 text-gray-700 mb-3" />
+                      <p className="text-xs text-gray-500 font-mono">Enter a GitHub repo URL above and click Load Commits.</p>
+                      <p className="text-[10px] text-gray-600 font-mono mt-1">Works with any public repository. Try: <span className="text-blue-500">github.com/microsoft/vscode</span></p>
+                    </div>
+                  )}
+                </>
+              )}
+
+              {/* --- BRAND CONTEXT TAB --- */}
+              {modalTab === 'brand' && (
+                <div className="flex flex-col gap-5">
+
+                  {/* Explainer banner */}
+                  <div className="flex items-start gap-3 p-4 bg-amber-950/30 border border-amber-800/30 rounded-xl">
+                    <Sparkles className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                    <div>
+                      <p className="text-xs font-semibold text-amber-200 font-mono">Brand Context is injected into every agent</p>
+                      <p className="text-[10px] text-amber-300/70 font-mono mt-0.5 leading-relaxed">
+                        All 6 agents read these guidelines before every pipeline run. Change company, connect a different repo, and ShipStory adapts instantly.
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Company Name */}
+                  <div className="flex flex-col gap-1.5">
+                    <label className="text-[10px] font-bold uppercase tracking-wider text-gray-400 font-mono">Company / Startup Name</label>
+                    <input
+                      type="text"
+                      value={brandName}
+                      onChange={e => setBrandName(e.target.value)}
+                      placeholder="e.g. Nexus Labs"
+                      className="bg-[#111116] border border-[#2a2a35] rounded-lg px-4 py-2.5 text-sm text-white font-mono placeholder-gray-600 focus:outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500/30 transition-colors"
+                    />
+                  </div>
+
+                  {/* Value Proposition */}
+                  <div className="flex flex-col gap-1.5">
+                    <label className="text-[10px] font-bold uppercase tracking-wider text-gray-400 font-mono">Value Proposition</label>
+                    <textarea
+                      value={brandValueProp}
+                      onChange={e => setBrandValueProp(e.target.value)}
+                      placeholder="What problem do you solve? Who for? What makes you different?"
+                      rows={2}
+                      className="bg-[#111116] border border-[#2a2a35] rounded-lg px-4 py-3 text-sm text-white font-mono placeholder-gray-600 focus:outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500/30 resize-none transition-colors"
+                    />
+                  </div>
+
+                  {/* Target Persona + Tone row */}
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="flex flex-col gap-1.5">
+                      <label className="text-[10px] font-bold uppercase tracking-wider text-gray-400 font-mono">Target Persona</label>
+                      <input
+                        type="text"
+                        value={brandPersona}
+                        onChange={e => setBrandPersona(e.target.value)}
+                        placeholder="e.g. Solo devs, lean startups"
+                        className="bg-[#111116] border border-[#2a2a35] rounded-lg px-4 py-2.5 text-sm text-white font-mono placeholder-gray-600 focus:outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500/30 transition-colors"
+                      />
+                    </div>
+                    <div className="flex flex-col gap-1.5">
+                      <label className="text-[10px] font-bold uppercase tracking-wider text-gray-400 font-mono">Brand Tone</label>
+                      <input
+                        type="text"
+                        value={brandTone}
+                        onChange={e => setBrandTone(e.target.value)}
+                        placeholder="e.g. Bold, technical, startup-energetic"
+                        className="bg-[#111116] border border-[#2a2a35] rounded-lg px-4 py-2.5 text-sm text-white font-mono placeholder-gray-600 focus:outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500/30 transition-colors"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Restricted Keywords */}
+                  <div className="flex flex-col gap-1.5">
+                    <label className="text-[10px] font-bold uppercase tracking-wider text-gray-400 font-mono">
+                      Restricted Keywords <span className="text-gray-600 normal-case">(comma-separated — Priscilla will flag these)</span>
+                    </label>
+                    <input
+                      type="text"
+                      value={brandKeywords}
+                      onChange={e => setBrandKeywords(e.target.value)}
+                      placeholder="pivot, exit strategy, acquisition target, bankruptcy"
+                      className="bg-[#111116] border border-[#2a2a35] rounded-lg px-4 py-2.5 text-sm text-white font-mono placeholder-gray-600 focus:outline-none focus:border-red-500 focus:ring-1 focus:ring-red-500/30 transition-colors"
+                    />
+                    {brandKeywords && (
+                      <div className="flex flex-wrap gap-1.5 mt-1">
+                        {brandKeywords.split(',').map(k => k.trim()).filter(Boolean).map((kw, i) => (
+                          <span key={i} className="text-[10px] font-mono bg-red-950/40 text-red-300 border border-red-800/30 rounded px-2 py-0.5">
+                            {kw}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Brand Voice */}
+                  <div className="flex flex-col gap-1.5">
+                    <label className="text-[10px] font-bold uppercase tracking-wider text-gray-400 font-mono">Raw Brand Voice &amp; Constraints</label>
+                    <textarea
+                      value={brandVoice}
+                      onChange={e => setBrandVoice(e.target.value)}
+                      placeholder="Free-form notes: writing style, content length, things to avoid, specific phrases..."
+                      rows={3}
+                      className="bg-[#111116] border border-[#2a2a35] rounded-lg px-4 py-3 text-sm text-white font-mono placeholder-gray-600 focus:outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500/30 resize-none transition-colors"
+                    />
+                  </div>
+
+                  {/* Save button */}
+                  <button
+                    onClick={saveBrandContext}
+                    disabled={savingBrand}
+                    className={`flex items-center justify-center gap-2 w-full py-3.5 font-bold text-sm rounded-xl transition-all duration-200 ${
+                      brandSaved
+                        ? 'bg-emerald-600 text-white'
+                        : savingBrand
+                        ? 'bg-gray-800 text-gray-400 cursor-not-allowed'
+                        : 'bg-amber-500 hover:bg-amber-400 text-gray-900'
+                    }`}
+                  >
+                    {savingBrand ? (
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                    ) : brandSaved ? (
+                      <CheckCircle2 className="w-4 h-4" />
+                    ) : (
+                      <Save className="w-4 h-4" />
+                    )}
+                    {brandSaved ? 'Saved! Agents will use this context.' : savingBrand ? 'Saving...' : 'Save Brand Context'}
+                  </button>
+
+                  <p className="text-center text-[10px] font-mono text-gray-600">
+                    Saved context persists in MongoDB and is loaded by all agents on every pipeline run.
+                  </p>
+                </div>
+              )}
+
+              {/* --- CUSTOM COMMIT MODE --- */}
+              {modalTab === 'custom' && (
+                <div className="flex flex-col gap-4">
+                  <div className="flex flex-col gap-2">
+                    <label className="text-[10px] font-bold uppercase tracking-wider text-gray-400 font-mono">Commit Message</label>
+                    <textarea
+                      value={customCommitMsg}
+                      onChange={(e) => setCustomCommitMsg(e.target.value)}
+                      placeholder={"feat(auth): implement OAuth2 with JWT refresh tokens\n\nAdds secure token rotation and revocation endpoints."}
+                      rows={4}
+                      className="bg-[#111116] border border-[#2a2a35] rounded-lg px-4 py-3 text-sm text-white font-mono placeholder-gray-600 focus:outline-none focus:border-purple-500 focus:ring-1 focus:ring-purple-500/40 resize-none transition-colors"
+                    />
+                  </div>
+                  <div className="flex flex-col gap-2">
+                    <label className="text-[10px] font-bold uppercase tracking-wider text-gray-400 font-mono">Changed Files <span className="text-gray-600">(comma-separated)</span></label>
+                    <input
+                      type="text"
+                      value={customFiles}
+                      onChange={(e) => setCustomFiles(e.target.value)}
+                      placeholder="auth/oauth.go, middleware/jwt.go, handlers/user.go"
+                      className="bg-[#111116] border border-[#2a2a35] rounded-lg px-4 py-2.5 text-sm text-white font-mono placeholder-gray-600 focus:outline-none focus:border-purple-500 focus:ring-1 focus:ring-purple-500/40 transition-colors"
+                    />
+                  </div>
+                  {/* Brand context reminder */}
+                  {brandName && (
+                    <div className="flex items-center gap-2 px-3 py-2 bg-amber-950/20 border border-amber-800/20 rounded-lg">
+                      <Building2 className="w-3.5 h-3.5 text-amber-500 shrink-0" />
+                      <span className="text-[10px] font-mono text-amber-300/80">Will be analyzed under <strong className="text-amber-200">{brandName}</strong></span>
+                    </div>
+                  )}
+                  <button
+                    onClick={triggerWithCustomCommit}
+                    disabled={!customCommitMsg.trim()}
+                    className="flex items-center justify-center gap-2 w-full py-3 bg-purple-600 hover:bg-purple-700 disabled:bg-gray-800 disabled:text-gray-500 disabled:cursor-not-allowed text-white font-bold text-sm rounded-xl transition-colors"
+                  >
+                    <Play className="w-4 h-4 fill-current" />
+                    Trigger Pipeline with Custom Commit
+                  </button>
+                </div>
+              )}
+
+            </div>
+
+            {/* Modal Footer */}
+            <div className="flex items-center justify-between px-6 py-3 border-t border-[#1e1e28] bg-[#0A0A0D] shrink-0">
+              <p className="text-[10px] text-gray-600 font-mono">
+                {modalTab === 'brand' ? 'Brand context is injected into all 6 agent backstories before each run' : 'Real commit data is passed to Devin for richer technical analysis'}
+              </p>
+              <button
+                onClick={() => setShowGitHubModal(false)}
+                className="text-xs font-mono text-gray-500 hover:text-gray-300 transition-colors"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
     </div>
   );
 }

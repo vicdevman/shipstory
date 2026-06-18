@@ -86,7 +86,6 @@ export async function POST(request: Request) {
     };
 
     state.current_session.chat_history.push(userMessageObj);
-    const initialLength = state.current_session.chat_history.length;
 
     try {
       state._id = "nexus_labs_brain";
@@ -161,61 +160,9 @@ export async function POST(request: Request) {
       });
     }
 
-    // Poll DB for Connie's response
-    const maxPollTime = 12000; // 12 seconds max polling time
-    const pollInterval = 200; // 200ms interval
-    let elapsed = 0;
-    let connieReplied = false;
-
-    while (elapsed < maxPollTime) {
-      await new Promise((resolve) => setTimeout(resolve, pollInterval));
-      elapsed += pollInterval;
-
-      try {
-        let updatedState: any = null;
-        try {
-          updatedState = await CompanyBrain.findOne({ _id: "nexus_labs_brain" }).lean();
-        } catch (pollErr) {
-          console.error('[Chat API] Error polling state from MongoDB:', pollErr);
-        }
-        if (!updatedState) {
-          const fileContent = await fs.readFile(dbPath, 'utf8');
-          updatedState = JSON.parse(fileContent);
-        }
-        
-        const history = updatedState.current_session?.chat_history || [];
-        
-        // Find if there is a connie message appended after our user message
-        const newConnieMsg = history.slice(initialLength).find((msg: any) => msg.sender === 'connie');
-        if (newConnieMsg) {
-          state = updatedState;
-          connieReplied = true;
-          break;
-        }
-      } catch (pollErr) {
-        console.error('Polling error:', pollErr);
-      }
-    }
-
-    if (!connieReplied) {
-      // If Connie timed out, add a fallback message so the UI is not stuck
-      const timeoutMsg = {
-        id: `msg_connie_timeout_${Date.now()}`,
-        sender: 'connie',
-        message: "I am currently processing requests on the Band network. Please check the Band room or try again in a moment.",
-        timestamp: new Date().toLocaleTimeString(),
-      };
-      state.current_session.chat_history.push(timeoutMsg);
-      
-      try {
-        state._id = "nexus_labs_brain";
-        await CompanyBrain.replaceOne({ _id: "nexus_labs_brain" }, state, { upsert: true });
-      } catch (err) {
-        console.error('[Chat API] Error saving timeout state to MongoDB:', err);
-      }
-      await saveLocalFallback(dbPath, state);
-    }
-
+    // FIRE-AND-RETURN: Do NOT poll. Return immediately.
+    // The frontend polls /api/brain every 1.5s and picks up Connie's reply
+    // when the Band agent writes it to chat_history in MongoDB.
     return NextResponse.json({ success: true, chat_history: state.current_session.chat_history });
   } catch (error) {
     return NextResponse.json({ error: 'Internal server error in chat API' }, { status: 500 });
