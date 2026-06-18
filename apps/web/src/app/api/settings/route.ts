@@ -54,8 +54,12 @@ export async function GET() {
     if (!state) {
       return NextResponse.json({ error: 'Company Brain not found' }, { status: 404 });
     }
+    const company_metadata = state.company_metadata || {};
+    if (!company_metadata.connected_repos) {
+      company_metadata.connected_repos = [];
+    }
     return NextResponse.json({
-      company_metadata: state.company_metadata || {},
+      company_metadata,
       operational_assets: {
         active_milestones: state.operational_assets?.active_milestones || [],
         epic_progress_percentages: state.operational_assets?.epic_progress_percentages || {},
@@ -83,6 +87,10 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Company Brain not found' }, { status: 404 });
     }
 
+    // Initialize nested paths if not present
+    if (!state.company_metadata) state.company_metadata = {};
+    if (!state.company_metadata.connected_repos) state.company_metadata.connected_repos = [];
+
     // ── Action: update_brand ──────────────────────────────────────────────────
     if (action === 'update_brand') {
       const {
@@ -94,7 +102,6 @@ export async function POST(request: Request) {
         raw_brand_voice_constraints,
       } = body;
 
-      if (!state.company_metadata) state.company_metadata = {};
       if (!state.company_metadata.style_guide) state.company_metadata.style_guide = {};
       if (!state.company_metadata.security_filters) state.company_metadata.security_filters = {};
 
@@ -122,6 +129,103 @@ export async function POST(request: Request) {
         success: true,
         message: 'Brand context updated. All future pipeline runs will use the new settings.',
         company_metadata: state.company_metadata,
+      });
+    }
+
+    // ── Action: connect_repo ──────────────────────────────────────────────────
+    if (action === 'connect_repo') {
+      const { url, description } = body;
+      if (!url) {
+        return NextResponse.json({ error: 'Repo URL is required' }, { status: 400 });
+      }
+
+      // Simple parser for github.com/owner/repo or similar
+      let extractedName = url.trim();
+      try {
+        const cleanUrl = url.replace(/^(https?:\/\/)?(www\.)?github\.com\//i, '').replace(/\.git$/i, '');
+        const parts = cleanUrl.split('/').filter(Boolean);
+        if (parts.length >= 2) {
+          extractedName = `${parts[0]}/${parts[1]}`;
+        }
+      } catch (e) {
+        // Fallback to raw url if parsing fails
+      }
+
+      // Check if already exists
+      const exists = state.company_metadata.connected_repos.some((r: any) => r.url === url);
+      if (exists) {
+        return NextResponse.json({ error: 'Repository URL already connected' }, { status: 400 });
+      }
+
+      const newRepo = {
+        id: Math.random().toString(36).substring(2, 11),
+        name: extractedName,
+        url: url.trim(),
+        description: description || '',
+        added_at: new Date().toISOString(),
+        is_primary: state.company_metadata.connected_repos.length === 0, // default primary if first
+      };
+
+      state.company_metadata.connected_repos.push(newRepo);
+      await persistState(dbPath, state);
+
+      return NextResponse.json({
+        success: true,
+        message: 'Repository connected successfully.',
+        connected_repos: state.company_metadata.connected_repos,
+      });
+    }
+
+    // ── Action: remove_repo ───────────────────────────────────────────────────
+    if (action === 'remove_repo') {
+      const { id } = body;
+      if (!id) {
+        return NextResponse.json({ error: 'Repository ID is required' }, { status: 400 });
+      }
+
+      const index = state.company_metadata.connected_repos.findIndex((r: any) => r.id === id);
+      if (index === -1) {
+        return NextResponse.json({ error: 'Repository not found' }, { status: 404 });
+      }
+
+      const wasPrimary = state.company_metadata.connected_repos[index].is_primary;
+      state.company_metadata.connected_repos.splice(index, 1);
+
+      // Reset primary if we just deleted the primary repo
+      if (wasPrimary && state.company_metadata.connected_repos.length > 0) {
+        state.company_metadata.connected_repos[0].is_primary = true;
+      }
+
+      await persistState(dbPath, state);
+      return NextResponse.json({
+        success: true,
+        message: 'Repository removed successfully.',
+        connected_repos: state.company_metadata.connected_repos,
+      });
+    }
+
+    // ── Action: set_primary_repo ──────────────────────────────────────────────
+    if (action === 'set_primary_repo') {
+      const { id } = body;
+      if (!id) {
+        return NextResponse.json({ error: 'Repository ID is required' }, { status: 400 });
+      }
+
+      const exists = state.company_metadata.connected_repos.some((r: any) => r.id === id);
+      if (!exists) {
+        return NextResponse.json({ error: 'Repository not found' }, { status: 404 });
+      }
+
+      state.company_metadata.connected_repos = state.company_metadata.connected_repos.map((r: any) => ({
+        ...r,
+        is_primary: r.id === id,
+      }));
+
+      await persistState(dbPath, state);
+      return NextResponse.json({
+        success: true,
+        message: 'Primary repository updated.',
+        connected_repos: state.company_metadata.connected_repos,
       });
     }
 

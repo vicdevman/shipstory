@@ -17,7 +17,7 @@ sudo apt update
 sudo apt install -y git curl build-essential python3 python3-venv python3-pip
 ```
 
-## 2. Create a deploy user
+## 2. Create a deploy user - NOT DONE
 
 Running the agents as a normal user is cleaner than using `root`.
 
@@ -29,12 +29,12 @@ su - shipstory
 
 ## 3. Clone the repository
 
-Pick a stable deployment directory like `/srv/shipstory`.
+Pick a stable deployment directory like `/shipstory`.
 
 ```bash
-sudo mkdir -p /srv/shipstory
-sudo chown -R shipstory:shipstory /srv/shipstory
-cd /srv/shipstory
+sudo mkdir -p /shipstory
+sudo chown -R shipstory:shipstory /shipstory
+cd /shipstory
 git clone YOUR_REPO_URL .
 ```
 
@@ -104,7 +104,7 @@ Only set the provider keys you actually use. The code in `agents/shared/llm_prov
 Before turning it into a service, run the orchestrator once from the terminal:
 
 ```bash
-cd /srv/shipstory/agents
+cd /shipstory/agents
 uv run python run_agents.py
 ```
 
@@ -129,8 +129,8 @@ Wants=network-online.target
 [Service]
 Type=simple
 User=shipstory
-WorkingDirectory=/srv/shipstory/agents
-EnvironmentFile=/srv/shipstory/agents/.env
+WorkingDirectory=/root/shipstory/agents
+EnvironmentFile=/root/shipstory/agents/.env
 ExecStart=/home/shipstory/.local/bin/uv run python run_agents.py
 Restart=always
 RestartSec=5
@@ -149,6 +149,7 @@ Then enable the service:
 sudo systemctl daemon-reload
 sudo systemctl enable shipstory-agents
 sudo systemctl start shipstory-agents
+sudo systemctl stop shipstory-agents
 sudo systemctl status shipstory-agents
 ```
 

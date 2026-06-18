@@ -23,7 +23,17 @@
         "private_beta_v1"
       ],
       "allow_public_roadmap": false
-    }
+    },
+    "connected_repos": [
+      {
+        "id": "e48xoojha",
+        "name": "vicdevman/shipstory",
+        "url": "https://github.com/vicdevman/shipstory.git",
+        "description": "",
+        "added_at": "2026-06-18T20:44:45.076Z",
+        "is_primary": true
+      }
+    ]
   },
   "operational_assets": {
     "active_prd_epics": "# PRD: Decentralized Sync Architecture\n\n## Feature Overview\nImplementing client-side PouchDB sharding coupled with a distributed Go syncing node layer to guarantee data replication across offline-first nodes without standard cloud latency thresholds.\n\n## Key Active Epics\n1. Epic-P2P: Build P2P network discovery gateways using secure WebRTC connections.\n2. Epic-Cache: Implement structured Redis lookup layers on backend caching nodes to minimize connection pooling latency overhead.\n3. Epic-Auth: Construct client-side cryptographic authentication checks for zero-trust private workspace sharing.",
@@ -140,6 +150,18 @@
         "sender": "user",
         "message": "hey connie whay arent you answering me",
         "timestamp": "11:57:03 AM"
+      },
+      {
+        "id": "msg_user_1781814917834",
+        "sender": "user",
+        "message": "hey connie",
+        "timestamp": "9:35:17 p.m."
+      },
+      {
+        "id": "msg_connie_1781815007702",
+        "sender": "connie",
+        "message": "The status of the current roadmap includes active milestones such as launching a real-time peer-to-peer syncing gateway and implementing highly visible offline-status indicators in the UI. The progress on specific epics includes:\n- Epic-P2P: 40%\n- Epic-Cache: 90%\n- Epic-Auth: 10%\n\nRecently, significant changes have been introduced with the migration to MongoDB for online sync, replacing the local JSON database. Devin provided a detailed technical summary, indicating updates across the project, and the changes are foundational for agent deployment and improved synchronization. If you have specific questions about these updates or need further assistance, let me know!",
+        "timestamp": "09:36:47 PM"
       }
     ]
   },

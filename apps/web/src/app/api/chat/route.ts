@@ -61,19 +61,26 @@ export async function POST(request: Request) {
     }
 
     // Check if room_id is set
-    if (!state.room_id) {
+    let roomId = state.room_id || '';
+    if (!roomId) {
       try {
         const localData = await fs.readFile(dbPath, 'utf8');
         const localState = JSON.parse(localData);
         if (localState.room_id) {
-          state.room_id = localState.room_id;
+          roomId = localState.room_id;
+          state.room_id = roomId;
         }
       } catch (e) {}
     }
 
-    if (!state.room_id) {
+    if (!roomId && process.env.BAND_ROOM_ID) {
+      roomId = process.env.BAND_ROOM_ID;
+      state.room_id = roomId;
+    }
+
+    if (!roomId) {
       return NextResponse.json(
-        { error: 'No active Band room ID found. Please make sure the Connie agent process is running and connected first.' },
+        { error: 'No active Band room ID found. Please make sure the Connie agent process is running or set the BAND_ROOM_ID environment variable.' },
         { status: 400 }
       );
     }
@@ -111,8 +118,8 @@ export async function POST(request: Request) {
 
     const restUrl = process.env.BAND_REST_URL || process.env.THENVOI_REST_URL || 'https://app.band.ai/';
 
-    if (devinApiKey && state.room_id && connieId) {
-      const url = `${restUrl.replace(/\/$/, '')}/api/v1/agent/chats/${state.room_id}/messages`;
+    if (devinApiKey && roomId && connieId) {
+      const url = `${restUrl.replace(/\/$/, '')}/api/v1/agent/chats/${roomId}/messages`;
       const bodyPayload = {
         message: {
           content: `vicdevman/connie ${message}`,
@@ -144,20 +151,11 @@ export async function POST(request: Request) {
         console.error(`[Band API] Fetch error posting message to Band room:`, err);
       });
     } else {
-      console.warn(`[Band API] Cannot send chat message directly: missing devinApiKey (${!!devinApiKey}), room_id (${!!state.room_id}), or connieId (${!!connieId}). Spawning trigger_chat.py fallback.`);
-      const { exec } = require('child_process');
-      const agentsDir = path.join(path.dirname(dbPath), '..');
-      exec('uv run python trigger_chat.py', { 
-        cwd: agentsDir,
-        env: { ...process.env, PYTHONPATH: '.', PYTHONUTF8: '1' }
-      }, (err: any, stdout: string, stderr: string) => {
-        if (err) {
-          console.error(`Failed to run trigger_chat.py: ${err.message}`);
-          console.error(`stderr: ${stderr}`);
-        } else {
-          console.log(`trigger_chat.py success: ${stdout}`);
-        }
-      });
+      console.error(`[Band API] Cannot send chat message: missing devinApiKey (${!!devinApiKey}), roomId (${!!roomId}), or connieId (${!!connieId}).`);
+      return NextResponse.json(
+        { error: 'Cannot contact Connie: Chat credentials/IDs are not configured on the server.' },
+        { status: 500 }
+      );
     }
 
     // FIRE-AND-RETURN: Do NOT poll. Return immediately.

@@ -1,0 +1,26 @@
+# Master Configuration for ShipStory Agent Network
+# Copy this file to agent_config.yaml and populate with actual UUIDs and API Keys from the Band platform interface.
+
+devin_eng:
+  agent_id: "your-devin-agent-uuid-here"
+  api_key: "band_a_your_devin_key_here"
+
+priscilla_product:
+  agent_id: "your-priscilla-agent-uuid-here"
+  api_key: "band_a_your_priscilla_key_here"
+
+marshall_research:
+  agent_id: "your-marshall-agent-uuid-here"
+  api_key: "band_a_your_marshall_key_here"
+
+gigi_marketing:
+  agent_id: "your-gigi-agent-uuid-here"
+  api_key: "band_a_your_gigi_key_here"
+
+vinci_design:
+  agent_id: "your-vinci-agent-uuid-here"
+  api_key: "band_a_your_vinci_key_here"
+
+connie_assistant:
+  agent_id: "your-connie-agent-uuid-here"
+  api_key: "band_a_your_connie_key_here"

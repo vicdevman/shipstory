@@ -83,30 +83,25 @@ Each agent in ShipStory runs as an isolated daemon. They communicate through **B
 ### Prerequisites
 Make sure you have `pnpm` (Node) and `uv` (Python) installed on your system.
 
-### 1. Environment Configuration
-Verify that the `agents/.env` file is populated with valid credentials:
-```ini
-AIML_API_KEY=your_key_here
-TAVILY_API_KEY=your_key_here
-MONGODB_URI=mongodb+srv://...
-CLOUDINARY_CLOUD_NAME=...
-CLOUDINARY_API_KEY=...
-CLOUDINARY_API_SECRET=...
-```
+### 1. Environment & Config Templates
+ShipStory is driven by two configuration layers. We have provided templates for both:
+- **Agents Environment**: Copy [agents/.env.example](file:///c:/Users/User/OneDrive/Desktop/projects/shipstory/agents/.env.example) to `.env` and fill in your Band API Keys, LLM Model Providers, MongoDB Atlas URI, and Cloudinary storage endpoints.
+- **Agent Identity Registry**: Copy [agents/agent_config.yaml.example](file:///c:/Users/User/OneDrive/Desktop/projects/shipstory/agents/agent_config.yaml.example) to `agent_config.yaml` and enter the agent UUIDs and Band platform developer keys.
+- **Web App Settings**: Copy [apps/web/.env.example](file:///c:/Users/User/OneDrive/Desktop/projects/shipstory/apps/web/.env.example) to `.env.local` and configure MongoDB connections.
 
 ### 2. Install Dependencies
-Install Node packages for the frontend and Python libraries for the agents:
+Install Node packages for the frontend workspace and build the application:
 ```bash
 # Install frontend web dependencies
 pnpm install
 
-# Build the web assets to verify type completeness
+# Build the web assets to verify type completeness and optimize bundles
 pnpm run build:web
 ```
 
 ### 3. Run the Entire System
 
-To start the ShipStory war room, you need to spin up the web dashboard and launch the platform agents.
+To start the ShipStory war room, spin up the web dashboard and launch the platform agents.
 
 **Step A: Launch the Next.js Visualizer Dashboard**
 ```bash
@@ -123,9 +118,27 @@ uv run python run_agents.py
 
 ---
 
+## ⚓ Workspace Onboarding & GitHub Webhook Tracking
+
+Instead of hardcoding a single repository, ShipStory operates a dynamic **Project Workspace**:
+1. Click **"Open Workspace"** in the top right of the dashboard.
+2. In the **Workspace Settings** tab, input your company details and connect multiple repositories (e.g. your backend, webapp, or mobile codebases). Mark one as the Primary codebase.
+3. Configure a GitHub Webhook pointing to your deployed Next.js `/api/webhook` endpoint:
+   - **Payload URL**: `https://your-domain.com/api/webhook`
+   - **Content type**: `application/json`
+   - **Events**: Just `push` events.
+4. **Trigger Mechanism**: Whenever a push is made to the `main` or `master` branch of **any connected repository**, the webhook parses the payload. If the repository matches a connected codebase, it launches the multi-agent war room:
+   - Devin parses the diff and summarizes the changes.
+   - Marshall scans Tavily for competitors and logs strategic roadmap advice.
+   - Gigi drafts tweets, changelogs, and newsletters matching the company guidelines.
+   - Priscilla verifies compliance, and Vinci generates mockup assets.
+   - Connie monitors the room as Chief of Staff to answer questions.
+
+---
+
 ## 🧠 Key Workflow States
 
-1. **GitHub Ingress (Start)**: A simulated git push sends `[github_commit]` to the room.
+1. **Ingress (Start)**: A push to `main` on a connected codebase triggers `/api/webhook`, launching the analysis.
 2. **Parallel Debate**: Devin summarizes code changes while Marshall runs a Tavily competitor search to log strategic recommendations.
 3. **Drafting**: Gigi drafts marketing posts. Priscilla audits for emoji limits (rejecting >2 emojis).
 4. **Design rendering**: Vinci turns approved copy into a design blueprint, generates an image using Flux 2 Pro, and uploads it to Cloudinary.

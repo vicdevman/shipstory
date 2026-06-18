@@ -65,23 +65,113 @@ export async function POST(request: Request) {
     }
 
     const sessionId = body.session_id || `sess_${Date.now()}`;
-    const triggerSource = body.source || 'MANUAL';
-    const rawInputs = body.raw_inputs || {
-      commit_message: body.commit_message || 'Manual Trigger Executed',
-      changed_files: body.changed_files || [],
-      commit_sha: body.commit_sha || null,
-      commit_author: body.commit_author || null,
-      commit_url: body.commit_url || null,
-      diff_summary: body.diff_summary || null,
-    };
+    
+    // Check if it's a GitHub push webhook payload
+    const isGitHubPush = !!(body.repository && body.head_commit);
+    
+    let commitMessage = body.commit_message || '';
+    let changedFiles: string[] = body.changed_files || [];
+    let commitSha = body.commit_sha || null;
+    let commitAuthor = body.commit_author || null;
+    let commitUrl = body.commit_url || null;
+    let diffSummary = body.diff_summary || null;
+    let triggerSource = body.source || 'MANUAL';
 
-    // Also capture top-level body fields into rawInputs if not already set
-    if (!rawInputs.commit_message) rawInputs.commit_message = body.commit_message || 'Manual Trigger Executed';
-    if (!rawInputs.changed_files?.length) rawInputs.changed_files = body.changed_files || [];
-    if (body.commit_sha) rawInputs.commit_sha = body.commit_sha;
-    if (body.commit_author) rawInputs.commit_author = body.commit_author;
-    if (body.commit_url) rawInputs.commit_url = body.commit_url;
-    if (body.diff_summary) rawInputs.diff_summary = body.diff_summary;
+    if (isGitHubPush) {
+      triggerSource = 'GITHUB_COMMIT';
+      const repoUrl = body.repository.html_url || body.repository.url || '';
+      
+      // Verification: Check if the repository is connected in our project workspace
+      const connectedRepos = state.company_metadata?.connected_repos || [];
+      const isConnected = connectedRepos.some((r: any) => {
+        const normalize = (u: string) => u.toLowerCase().replace(/\/$/, '').replace(/\.git$/, '');
+        return normalize(r.url) === normalize(repoUrl);
+      });
+
+      if (!isConnected) {
+        console.warn(`[Webhook API] Ignored push webhook: Repository ${repoUrl} is not connected to this workspace.`);
+        return NextResponse.json({ 
+          success: false, 
+          message: `Repository ${repoUrl} is not connected to this workspace.` 
+        }, { status: 200 }); // Return 200 so GitHub doesn't fail
+      }
+
+      // Check if it is the main/master branch push
+      const ref = body.ref || '';
+      const isMainBranch = ref === 'refs/heads/main' || ref === 'refs/heads/master' || ref.endsWith('/main') || ref.endsWith('/master');
+      if (!isMainBranch) {
+        console.log(`[Webhook API] Ignored push on branch ${ref}. Only main/master branch pushes trigger the pipeline.`);
+        return NextResponse.json({ 
+          success: false, 
+          message: `Ignored branch push. Only main/master branch updates trigger the analysis pipeline.` 
+        }, { status: 200 });
+      }
+
+      // Extract GitHub webhook details
+      commitMessage = body.head_commit.message || '';
+      const fullCommitSha = body.head_commit.id || '';
+      commitSha = fullCommitSha.slice(0, 7) || null;
+      commitAuthor = body.head_commit.author?.name || body.head_commit.committer?.name || 'GitHub Webhook';
+      commitUrl = body.head_commit.url || null;
+
+      // Fetch the detailed commit patches from GitHub API
+      const repoFullName = body.repository.full_name || '';
+      if (repoFullName && fullCommitSha) {
+        try {
+          const headers: Record<string, string> = { Accept: 'application/vnd.github.v3+json' };
+          const githubToken = process.env.GITHUB_TOKEN || '';
+          if (githubToken) {
+            headers['Authorization'] = `Bearer ${githubToken}`;
+          }
+
+          const githubApiUrl = `https://api.github.com/repos/${repoFullName}/commits/${fullCommitSha}`;
+          const res = await fetch(githubApiUrl, { headers });
+          if (res.ok) {
+            const commitDetail = await res.json();
+            const files = commitDetail.files || [];
+            changedFiles = files.map((f: any) => f.filename);
+
+            // Generate diff summary for the first 3 files
+            const patches = files.slice(0, 3).map((f: any) => {
+              const patch = f.patch ? f.patch.slice(0, 400) : '';
+              return patch ? `--- ${f.filename}\n${patch}` : '';
+            }).filter(Boolean).join('\n\n');
+
+            if (patches) {
+              diffSummary = `\n\nCode Diff (first 3 files):\n${patches}`;
+            }
+          }
+        } catch (e) {
+          console.error(`[Webhook API] Failed to fetch commit details from GitHub API:`, e);
+        }
+      }
+
+      // Fallback: Extract changed files from the webhook commits array directly
+      if (changedFiles.length === 0) {
+        const filesSet = new Set<string>();
+        if (Array.isArray(body.commits)) {
+          for (const c of body.commits) {
+            if (Array.isArray(c.added)) c.added.forEach((f: string) => filesSet.add(f));
+            if (Array.isArray(c.modified)) c.modified.forEach((f: string) => filesSet.add(f));
+            if (Array.isArray(c.removed)) c.removed.forEach((f: string) => filesSet.add(f));
+          }
+        }
+        changedFiles = Array.from(filesSet);
+      }
+
+      if (changedFiles.length === 0) {
+        changedFiles = ['codebase'];
+      }
+    }
+
+    const rawInputs = {
+      commit_message: commitMessage || 'Manual Trigger Executed',
+      changed_files: changedFiles,
+      commit_sha: commitSha,
+      commit_author: commitAuthor,
+      commit_url: commitUrl,
+      diff_summary: diffSummary,
+    };
 
     // Archive previous session to session_history if it exists
     if (state.current_session && state.current_session.session_id) {
