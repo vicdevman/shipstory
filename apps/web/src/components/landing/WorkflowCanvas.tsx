@@ -6,21 +6,21 @@ import { TOKENS } from '@/lib/tokens';
 
 export function WorkflowCanvas() {
   return (
-    <div className="w-full max-w-5xl mx-auto mt-12">
+    <div className="w-full max-w-6xl mx-auto mt-12">
       {/* Outer canvas wrapper with gradient and border */}
       <div 
-        className="relative rounded-[24px] bg-[#EFEFEA] p-6 md:p-10 border border-[#E8E8E3] shadow-[0_1px_3px_rgba(0,0,0,0.02)]
+        className="relative rounded-[24px] bg-[#EFEFEA] p-4 scrollbar-none md:p-6 border border-[#E8E8E3] shadow-[0_1px_3px_rgba(0,0,0,0.02)]
                    bg-[radial-gradient(ellipse_at_bottom_right,#E4EDD9_40%,transparent_80%)] overflow-hidden"
       >
         
         {/* Floating status pill, top right */}
-        <div className="absolute right-6 top-6 flex h-9 w-9 items-center justify-center 
+        {/* <div className="absolute right-6 top-6 flex h-9 w-9 items-center justify-center 
                         rounded-full bg-[#B7CE8F] shadow-[0_1px_2px_rgba(0,0,0,0.06)] z-10">
           <MicOff className="h-4 w-4 text-[#2B3324]" />
-        </div>
+        </div> */}
 
         {/* Workflow container with horizontal scroll wrapper for mobile, flex layout for desktop */}
-        <div className="w-full overflow-x-auto no-scrollbar scroll-smooth">
+        <div className="w-full overflow-x-auto no-scrollbar scroll-smooth scrollbar-none">
           <div className="min-w-[840px] md:min-w-0 relative flex items-stretch justify-between gap-2 md:gap-4 py-4 px-2">
             
             {/* NODE 1 — Pipeline Queue */}

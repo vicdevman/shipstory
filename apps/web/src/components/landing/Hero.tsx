@@ -1,6 +1,6 @@
 import React from 'react';
 import { Button } from '@/components/ui/button';
-import { Sparkles } from 'lucide-react';
+import { HatGlasses, Sparkles } from 'lucide-react';
 
 interface HeroProps {
   onEnterDashboard: () => void;
@@ -16,7 +16,7 @@ export function Hero({ onEnterDashboard }: HeroProps) {
         
         {/* Eyebrow badge */}
         <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#ECECE8] border border-[#E8E8E3] text-[#5C5C57] text-[11px] font-semibold uppercase tracking-wider mb-6 animate-fade-in">
-          <Sparkles className="w-3.5 h-3.5 text-[#B7CE8F] animate-pulse" />
+          <HatGlasses className="w-3.5 h-3.5 text-[#B7CE8F] animate-pulse" />
           Autonomous Growth Department on Band
         </div>
 

@@ -56,6 +56,7 @@ import {
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import { WalkthroughModal } from '@/components/landing/WalkthroughModal';
 
 // Custom Node Component to render workflow agents, triggers, conditions, and outputs with high legibility
 const CustomNode = React.memo(({ data, selected }: any) => {
@@ -671,6 +672,7 @@ export default function Dashboard() {
 
   // ── GitHub Commit Explorer state ────────────────────────────────────────────
   const [showGitHubModal, setShowGitHubModal] = useState(false);
+  const [showWalkthroughModal, setShowWalkthroughModal] = useState(false);
   const [ghRepoUrl, setGhRepoUrl] = useState('');
   const [ghToken, setGhToken] = useState('');
   const [ghCommits, setGhCommits] = useState<any[]>([]);
@@ -1903,6 +1905,17 @@ export default function Dashboard() {
               Complete!
             </div>
           )}
+
+          {/* Watch Walkthrough button */}
+          <button
+            onClick={() => setShowWalkthroughModal(true)}
+            className="flex items-center gap-1.5 h-8 md:h-9 border border-gray-200 bg-white hover:bg-gray-50 text-[10px] md:text-xs font-semibold rounded-lg shadow-sm shrink-0 cursor-pointer text-gray-700"
+            style={{ padding: '6px 12px' }}
+            title="Watch Video Walkthrough"
+          >
+            <Play className="w-3.5 h-3.5 fill-current text-gray-500 animate-pulse" />
+            <span>Watch Demo</span>
+          </button>
 
           {/* Workspace Dashboard button */}
           <button
@@ -3711,6 +3724,13 @@ export default function Dashboard() {
             </div>
           </div>
         </div>
+      )}
+
+      {showWalkthroughModal && (
+        <WalkthroughModal 
+          onClose={() => setShowWalkthroughModal(false)} 
+          isDashboardMode={true} 
+        />
       )}
 
     </div>
