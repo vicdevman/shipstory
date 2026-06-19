@@ -54,6 +54,7 @@ const defaultState = {
       "priscilla_importance_score": null,
       "gigi_content_drafts": {
         "twitter": null,
+        "linkedin": null,
         "changelog": null,
         "newsletter": null
       },
@@ -136,21 +137,68 @@ async function readJsonFileWithRetry(filePath: string, retries = 3, delayMs = 50
   throw lastError || new Error(`Failed to read valid JSON from ${filePath} after ${retries} retries`);
 }
 
-export async function GET() {
+export async function GET(request: Request) {
+  const { searchParams } = new URL(request.url);
+  const companyId = searchParams.get('company_id') || 'nexus_labs';
+  const docId = companyId === 'nexus_labs' ? 'nexus_labs_brain' : `company_brain_${companyId}`;
+  
   const dbPath = getDbPath();
   let state: any = null;
 
   try {
     await connectMongoose();
-    state = await CompanyBrain.findOne({ _id: "nexus_labs_brain" }).lean();
+    state = await CompanyBrain.findOne({ _id: docId }).lean();
+    
+    // Self-healing initialization for new dynamic company brains
+    if (!state && companyId !== 'nexus_labs') {
+      const brandName = companyId.charAt(0).toUpperCase() + companyId.slice(1);
+      state = {
+        ...defaultState,
+        _id: docId,
+        company_metadata: {
+          ...defaultState.company_metadata,
+          name: brandName,
+          connected_repos: []
+        },
+        current_session: {
+          status: 'INGRESS_INITIALIZED',
+          trigger_source: 'MANUAL_PULL',
+          agent_outputs: {},
+          rejections_and_memos: [],
+          chat_history: []
+        }
+      };
+      await CompanyBrain.create(state);
+    }
+
     if (state) {
-      cachedState = state; // Update cache on success
-      // Keep local JSON in sync
-      await saveLocalFallback(dbPath, state);
+      // Sync room_id if missing or empty on the startup state
+      if (!state.room_id) {
+        const nexusState = await CompanyBrain.findOne({ _id: 'nexus_labs_brain' }).lean() as any;
+        if (nexusState && nexusState.room_id) {
+          state.room_id = nexusState.room_id;
+          // save it back to startup state in DB
+          await CompanyBrain.updateOne({ _id: docId }, { $set: { room_id: nexusState.room_id } });
+        }
+      }
+
+      // Upsert context mapping if room_id is present
+      if (state.room_id) {
+        await CompanyBrain.updateOne(
+          { _id: `active_context_${state.room_id}` },
+          { $set: { company_id: companyId } },
+          { upsert: true }
+        );
+      }
+
+      if (companyId === 'nexus_labs') {
+        cachedState = state;
+        await saveLocalFallback(dbPath, state);
+      }
       return NextResponse.json(state);
     }
   } catch (error) {
-    console.error('Failed to read database state from MongoDB in GET /api/brain:', error);
+    console.error(`Failed to read database state for ${docId} in GET /api/brain:`, error);
   }
 
   // Fallback to local JSON file

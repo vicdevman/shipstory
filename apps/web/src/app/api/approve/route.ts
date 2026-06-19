@@ -26,7 +26,9 @@ function getDbPath() {
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    const { action } = body;
+    const { action, company_id } = body;
+    const companyId = company_id || 'nexus_labs';
+    const docId = companyId === 'nexus_labs' ? 'nexus_labs_brain' : `company_brain_${companyId}`;
 
     if (!action) {
       return NextResponse.json({ error: 'Action is required' }, { status: 400 });
@@ -36,7 +38,7 @@ export async function POST(request: Request) {
     let state: any = null;
     try {
       await connectMongoose();
-      state = await CompanyBrain.findOne({ _id: "nexus_labs_brain" }).lean();
+      state = await CompanyBrain.findOne({ _id: docId }).lean();
     } catch (err) {
       console.error('[Approve API] Error loading state from MongoDB:', err);
     }
@@ -74,13 +76,43 @@ export async function POST(request: Request) {
       }
 
       try {
-        state._id = "nexus_labs_brain";
-        await CompanyBrain.replaceOne({ _id: "nexus_labs_brain" }, state, { upsert: true });
+        state._id = docId;
+        await CompanyBrain.replaceOne({ _id: docId }, state, { upsert: true });
       } catch (err) {
         console.error('[Approve API] Error saving state to MongoDB:', err);
       }
-      await saveLocalFallback(dbPath, state);
+      if (companyId === 'nexus_labs') {
+        await saveLocalFallback(dbPath, state);
+      }
       return NextResponse.json({ success: true, message: 'Recommendation approved and milestone added.', state });
+    }
+
+    if (action === 'reject_recommendation') {
+      const { recommendation_id } = body;
+      if (!recommendation_id) {
+        return NextResponse.json({ error: 'Recommendation ID is required' }, { status: 400 });
+      }
+
+      const recommendations = state.evolutionary_feedback_loop?.active_recommendations || [];
+      state.evolutionary_feedback_loop.active_recommendations = recommendations.filter(
+        (r: any) => r.recommendation_id !== recommendation_id
+      );
+
+      // Also clean up from active session output if it matches
+      if (state.current_session?.agent_outputs?.marshall_recommendation?.recommendation_id === recommendation_id) {
+        state.current_session.agent_outputs.marshall_recommendation = null;
+      }
+
+      try {
+        state._id = docId;
+        await CompanyBrain.replaceOne({ _id: docId }, state, { upsert: true });
+      } catch (err) {
+        console.error('[Approve API] Error saving state to MongoDB:', err);
+      }
+      if (companyId === 'nexus_labs') {
+        await saveLocalFallback(dbPath, state);
+      }
+      return NextResponse.json({ success: true, message: 'Recommendation rejected and removed.', state });
     }
 
     if (action === 'update_drafts') {
@@ -99,12 +131,14 @@ export async function POST(request: Request) {
       };
 
       try {
-        state._id = "nexus_labs_brain";
-        await CompanyBrain.replaceOne({ _id: "nexus_labs_brain" }, state, { upsert: true });
+        state._id = docId;
+        await CompanyBrain.replaceOne({ _id: docId }, state, { upsert: true });
       } catch (err) {
         console.error('[Approve API] Error saving state to MongoDB:', err);
       }
-      await saveLocalFallback(dbPath, state);
+      if (companyId === 'nexus_labs') {
+        await saveLocalFallback(dbPath, state);
+      }
       return NextResponse.json({ success: true, message: 'Drafts updated successfully.', state });
     }
 
@@ -116,12 +150,14 @@ export async function POST(request: Request) {
       state.current_session.agent_outputs.approval_status = 'SHIPPED';
 
       try {
-        state._id = "nexus_labs_brain";
-        await CompanyBrain.replaceOne({ _id: "nexus_labs_brain" }, state, { upsert: true });
+        state._id = docId;
+        await CompanyBrain.replaceOne({ _id: docId }, state, { upsert: true });
       } catch (err) {
         console.error('[Approve API] Error saving state to MongoDB:', err);
       }
-      await saveLocalFallback(dbPath, state);
+      if (companyId === 'nexus_labs') {
+        await saveLocalFallback(dbPath, state);
+      }
       return NextResponse.json({ success: true, message: 'Campaign shipped and status updated.', state });
     }
 

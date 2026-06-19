@@ -20,37 +20,47 @@ function getDbPath() {
   return paths[0];
 }
 
-async function loadState(dbPath: string): Promise<any> {
+async function loadState(dbPath: string, docId: string): Promise<any> {
   try {
     await connectMongoose();
-    const s = await CompanyBrain.findOne({ _id: 'nexus_labs_brain' }).lean();
+    const s = await CompanyBrain.findOne({ _id: docId }).lean();
     if (s) return s;
   } catch (err) {
     console.error('[Settings API] MongoDB error:', err);
   }
-  try {
-    const data = await fs.readFile(dbPath, 'utf8');
-    return JSON.parse(data);
-  } catch (err) {
-    return null;
+  if (docId === 'nexus_labs_brain') {
+    try {
+      const data = await fs.readFile(dbPath, 'utf8');
+      return JSON.parse(data);
+    } catch (err) {
+      return null;
+    }
   }
+  return null;
 }
 
-async function persistState(dbPath: string, state: any): Promise<void> {
+async function persistState(dbPath: string, state: any, docId?: string): Promise<void> {
+  const finalDocId = docId || state._id || 'nexus_labs_brain';
   try {
-    state._id = 'nexus_labs_brain';
-    await CompanyBrain.replaceOne({ _id: 'nexus_labs_brain' }, state, { upsert: true });
+    state._id = finalDocId;
+    await CompanyBrain.replaceOne({ _id: finalDocId }, state, { upsert: true });
   } catch (err) {
     console.error('[Settings API] MongoDB save error:', err);
   }
-  await saveLocalFallback(dbPath, state);
+  if (finalDocId === 'nexus_labs_brain') {
+    await saveLocalFallback(dbPath, state);
+  }
 }
 
 // GET — return company_metadata + operational_assets for the brand editor
-export async function GET() {
+export async function GET(request: Request) {
   try {
+    const { searchParams } = new URL(request.url);
+    const companyId = searchParams.get('company_id') || 'nexus_labs';
+    const docId = companyId === 'nexus_labs' ? 'nexus_labs_brain' : `company_brain_${companyId}`;
+
     const dbPath = getDbPath();
-    const state = await loadState(dbPath);
+    const state = await loadState(dbPath, docId);
     if (!state) {
       return NextResponse.json({ error: 'Company Brain not found' }, { status: 404 });
     }
@@ -64,6 +74,7 @@ export async function GET() {
         active_milestones: state.operational_assets?.active_milestones || [],
         epic_progress_percentages: state.operational_assets?.epic_progress_percentages || {},
         pitch_deck_summary: state.operational_assets?.pitch_deck_summary || '',
+        documents: state.operational_assets?.documents || {}
       },
     });
   } catch (error) {
@@ -75,14 +86,16 @@ export async function GET() {
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    const { action } = body;
+    const { action, company_id } = body;
+    const companyId = company_id || 'nexus_labs';
+    const docId = companyId === 'nexus_labs' ? 'nexus_labs_brain' : `company_brain_${companyId}`;
 
     if (!action) {
       return NextResponse.json({ error: 'Action is required' }, { status: 400 });
     }
 
     const dbPath = getDbPath();
-    const state = await loadState(dbPath);
+    const state = await loadState(dbPath, docId);
     if (!state) {
       return NextResponse.json({ error: 'Company Brain not found' }, { status: 404 });
     }
@@ -248,6 +261,22 @@ export async function POST(request: Request) {
       state.operational_assets.pitch_deck_summary = pitch_deck_summary || '';
       await persistState(dbPath, state);
       return NextResponse.json({ success: true, message: 'Pitch deck updated.' });
+    }
+
+    // ── Action: update_documents ──────────────────────────────────────────────
+    if (action === 'update_documents') {
+      const { documents } = body;
+      if (!state.operational_assets) state.operational_assets = {};
+      state.operational_assets.documents = {
+        ...state.operational_assets.documents,
+        ...documents
+      };
+      await persistState(dbPath, state);
+      return NextResponse.json({
+        success: true,
+        message: 'Workspace documents updated.',
+        documents: state.operational_assets.documents
+      });
     }
 
     return NextResponse.json({ error: `Unsupported action: ${action}` }, { status: 400 });

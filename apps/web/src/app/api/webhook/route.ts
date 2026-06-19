@@ -30,9 +30,33 @@ export async function POST(request: Request) {
 
     // Load current state from MongoDB or fallback to file
     let state: any = null;
+    const repoUrl = body.repository?.html_url || body.repository?.url || '';
+    const companyIdFromPayload = body.company_id || '';
+
     try {
       await connectMongoose();
-      state = await CompanyBrain.findOne({ _id: "nexus_labs_brain" }).lean();
+      if (repoUrl) {
+        const normalize = (u: string) => u.toLowerCase().replace(/\/$/, '').replace(/\.git$/, '');
+        const normalizedUrl = normalize(repoUrl);
+        const allBrains = await CompanyBrain.find({}).lean();
+        for (const brain of allBrains) {
+          const repos = brain.company_metadata?.connected_repos || [];
+          const matched = repos.some((r: any) => normalize(r.url) === normalizedUrl);
+          if (matched) {
+            state = brain;
+            break;
+          }
+        }
+      }
+      
+      if (!state && companyIdFromPayload) {
+        const docId = companyIdFromPayload === 'nexus_labs' ? 'nexus_labs_brain' : `company_brain_${companyIdFromPayload}`;
+        state = await CompanyBrain.findOne({ _id: docId }).lean();
+      }
+
+      if (!state) {
+        state = await CompanyBrain.findOne({ _id: "nexus_labs_brain" }).lean();
+      }
     } catch (err) {
       console.error('[Webhook API] Error loading state from MongoDB:', err);
     }
@@ -62,6 +86,19 @@ export async function POST(request: Request) {
         { error: 'No active Band room ID found. Please start the agent processes first so they can connect and sync the room ID.' },
         { status: 400 }
       );
+    }
+
+    // Upsert the active context mapping
+    const stateDocId = state._id || 'nexus_labs_brain';
+    const companyId = stateDocId === 'nexus_labs_brain' ? 'nexus_labs' : stateDocId.replace('company_brain_', '');
+    try {
+      await CompanyBrain.updateOne(
+        { _id: `active_context_${state.room_id}` },
+        { $set: { company_id: companyId } },
+        { upsert: true }
+      );
+    } catch (err) {
+      console.error('[Webhook API] Error saving active context mapping to MongoDB:', err);
     }
 
     const sessionId = body.session_id || `sess_${Date.now()}`;
@@ -164,14 +201,26 @@ export async function POST(request: Request) {
       }
     }
 
-    const rawInputs = {
-      commit_message: commitMessage || 'Manual Trigger Executed',
-      changed_files: changedFiles,
-      commit_sha: commitSha,
-      commit_author: commitAuthor,
-      commit_url: commitUrl,
-      diff_summary: diffSummary,
-    };
+    let rawInputs: any = {};
+    if (triggerSource === 'MANUAL_CAMPAIGN') {
+      const conceptPrompt = body.concept_prompt || 'Custom Campaign Concept';
+      rawInputs = {
+        concept_prompt: conceptPrompt,
+        commit_message: `Concept: ${conceptPrompt.slice(0, 80)}${conceptPrompt.length > 80 ? '...' : ''}`,
+        changed_files: [],
+        commit_author: 'Marketing Manager',
+        commit_sha: 'concept',
+      };
+    } else {
+      rawInputs = {
+        commit_message: commitMessage || 'Manual Trigger Executed',
+        changed_files: changedFiles,
+        commit_sha: commitSha,
+        commit_author: commitAuthor,
+        commit_url: commitUrl,
+        diff_summary: diffSummary,
+      };
+    }
 
     // Archive previous session to session_history if it exists
     if (state.current_session && state.current_session.session_id) {
@@ -188,6 +237,10 @@ export async function POST(request: Request) {
     // Initialize the session state
     const commitAuthorStr = rawInputs.commit_author ? ` by ${rawInputs.commit_author}` : '';
     const commitShaStr = rawInputs.commit_sha ? ` (${rawInputs.commit_sha})` : '';
+    const welcomeMsg = triggerSource === 'MANUAL_CAMPAIGN'
+      ? `New manual campaign concept triggered: "${rawInputs.concept_prompt}"! Marshall has entered the war room to scan strategic pivots.`
+      : `GitHub commit detected${commitAuthorStr}${commitShaStr}! Devin, Priscilla, Marshall, and Gigi have entered the war room to analyze: "${(rawInputs.commit_message || '').slice(0, 80)}"`;
+
     state.current_session = {
       session_id: sessionId,
       created_at: new Date().toISOString(),
@@ -199,6 +252,7 @@ export async function POST(request: Request) {
         priscilla_importance_score: null,
         gigi_content_drafts: {
           twitter: null,
+          linkedin: null,
           changelog: null,
           newsletter: null,
         },
@@ -209,24 +263,29 @@ export async function POST(request: Request) {
         {
           id: 'welcome',
           sender: 'connie',
-          message: `GitHub commit detected${commitAuthorStr}${commitShaStr}! Devin, Priscilla, Marshall, and Gigi have entered the war room to analyze: "${(rawInputs.commit_message || '').slice(0, 80)}"`,
+          message: welcomeMsg,
           timestamp: new Date().toLocaleTimeString(),
         }
       ],
     };
 
     // Save updated state
+    const docId = state._id || 'nexus_labs_brain';
     try {
-      state._id = "nexus_labs_brain";
-      await CompanyBrain.replaceOne({ _id: "nexus_labs_brain" }, state, { upsert: true });
+      state._id = docId;
+      await CompanyBrain.replaceOne({ _id: docId }, state, { upsert: true });
     } catch (err) {
       console.error('[Webhook API] Error saving state to MongoDB:', err);
     }
-    await saveLocalFallback(dbPath, state);
+    if (docId === 'nexus_labs_brain') {
+      await saveLocalFallback(dbPath, state);
+    }
 
     // Send direct HTTP call to Band room API for commit trigger
+    // Send direct HTTP call to Band room API for trigger
     let connieApiKey = process.env.CONNIE_API_KEY || '';
     let devinId = process.env.DEVIN_AGENT_ID || '';
+    let marshallId = process.env.MARSHALL_AGENT_ID || '';
 
     const agentConfig = getAgentConfig();
     if (agentConfig) {
@@ -238,28 +297,47 @@ export async function POST(request: Request) {
       if (agentConfig.devin_eng) {
         devinId = agentConfig.devin_eng.agent_id || devinId;
       }
+      if (agentConfig.marshall_research) {
+        marshallId = agentConfig.marshall_research.agent_id || marshallId;
+      }
     }
 
     const restUrl = process.env.BAND_REST_URL || process.env.THENVOI_REST_URL || 'https://app.band.ai/';
 
-    if (connieApiKey && state.room_id && devinId) {
+    let targetAgentId = devinId;
+    let targetHandle = 'vicdevman/devin';
+    let targetName = 'Devin';
+
+    if (triggerSource === 'MANUAL_CAMPAIGN') {
+      targetAgentId = marshallId;
+      targetHandle = 'vicdevman/marshall';
+      targetName = 'Marshall';
+    }
+
+    if (connieApiKey && state.room_id && targetAgentId) {
       const url = `${restUrl.replace(/\/$/, '')}/api/v1/agent/chats/${state.room_id}/messages`;
-      const commitMsg = rawInputs.commit_message || 'Manual Trigger Executed';
-      const filesList = rawInputs.changed_files || [];
-      const authorStr = rawInputs.commit_author ? `\nAuthor: ${rawInputs.commit_author}` : '';
-      const shaStr = rawInputs.commit_sha ? `\nSHA: ${rawInputs.commit_sha}` : '';
-      const urlStr = rawInputs.commit_url ? `\nURL: ${rawInputs.commit_url}` : '';
-      const diffStr = rawInputs.diff_summary ? `\n${rawInputs.diff_summary}` : '';
-      const content = `[GITHUB_COMMIT] New commit triggered:\nMessage: ${commitMsg}\nFiles: ${filesList.join(', ')}${authorStr}${shaStr}${urlStr}${diffStr}\n\n@vicdevman/devin please review.`;
+      
+      let content = '';
+      if (triggerSource === 'MANUAL_CAMPAIGN') {
+        content = `[MANUAL_CAMPAIGN] New campaign concept triggered:\nConcept: ${rawInputs.concept_prompt}\n\n@vicdevman/marshall please research this concept.`;
+      } else {
+        const commitMsg = rawInputs.commit_message || 'Manual Trigger Executed';
+        const filesList = rawInputs.changed_files || [];
+        const authorStr = rawInputs.commit_author ? `\nAuthor: ${rawInputs.commit_author}` : '';
+        const shaStr = rawInputs.commit_sha ? `\nSHA: ${rawInputs.commit_sha}` : '';
+        const urlStr = rawInputs.commit_url ? `\nURL: ${rawInputs.commit_url}` : '';
+        const diffStr = rawInputs.diff_summary ? `\n${rawInputs.diff_summary}` : '';
+        content = `[GITHUB_COMMIT] New commit triggered:\nMessage: ${commitMsg}\nFiles: ${filesList.join(', ')}${authorStr}${shaStr}${urlStr}${diffStr}\n\n@vicdevman/devin please review.`;
+      }
 
       const bodyPayload = {
         message: {
           content: content,
           mentions: [
             {
-              id: devinId,
-              handle: 'vicdevman/devin',
-              name: 'Devin'
+              id: targetAgentId,
+              handle: targetHandle,
+              name: targetName
             }
           ]
         }
@@ -275,15 +353,15 @@ export async function POST(request: Request) {
       }).then(async (res) => {
         if (!res.ok) {
           const text = await res.text();
-          console.error(`[Band API] Failed to post commit trigger to Band room: ${res.status} ${text}`);
+          console.error(`[Band API] Failed to post trigger to Band room: ${res.status} ${text}`);
         } else {
-          console.log(`[Band API] Successfully posted commit trigger to Band room.`);
+          console.log(`[Band API] Successfully posted trigger to Band room.`);
         }
       }).catch((err) => {
-        console.error(`[Band API] Fetch error posting commit trigger to Band room:`, err);
+        console.error(`[Band API] Fetch error posting trigger to Band room:`, err);
       });
     } else {
-      console.warn(`[Band API] Cannot send commit trigger directly: missing connieApiKey (${!!connieApiKey}), room_id (${!!state.room_id}), or devinId (${!!devinId}). Spawning trigger_commit.py fallback.`);
+      console.warn(`[Band API] Cannot send trigger directly: missing keys or room_id. Spawning trigger_commit.py fallback.`);
       const { exec } = require('child_process');
       const agentsDir = path.join(path.dirname(dbPath), '..');
       exec('uv run python trigger_commit.py', { 
@@ -292,7 +370,6 @@ export async function POST(request: Request) {
       }, (err: any, stdout: string, stderr: string) => {
         if (err) {
           console.error(`Failed to run trigger_commit.py: ${err.message}`);
-          console.error(`stderr: ${stderr}`);
         } else {
           console.log(`trigger_commit.py success: ${stdout}`);
         }

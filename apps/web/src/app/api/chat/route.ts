@@ -25,16 +25,19 @@ function getDbPath() {
 
 export async function POST(request: Request) {
   try {
-    const { message } = await request.json();
+    const { message, company_id } = await request.json();
     if (!message) {
       return NextResponse.json({ error: 'Message is required' }, { status: 400 });
     }
+
+    const companyId = company_id || 'nexus_labs';
+    const docId = companyId === 'nexus_labs' ? 'nexus_labs_brain' : `company_brain_${companyId}`;
 
     const dbPath = getDbPath();
     let state: any = null;
     try {
       await connectMongoose();
-      state = await CompanyBrain.findOne({ _id: "nexus_labs_brain" }).lean();
+      state = await CompanyBrain.findOne({ _id: docId }).lean();
     } catch (err) {
       console.error('[Chat API] Error loading state from MongoDB:', err);
     }
@@ -49,6 +52,15 @@ export async function POST(request: Request) {
     }
 
     // Initialize chat history if not exists
+    if (!state.current_session) {
+      state.current_session = {
+        status: 'INGRESS_INITIALIZED',
+        trigger_source: 'MANUAL_PULL',
+        agent_outputs: {},
+        rejections_and_memos: [],
+        chat_history: []
+      };
+    }
     if (!state.current_session.chat_history) {
       state.current_session.chat_history = [
         {
@@ -85,6 +97,17 @@ export async function POST(request: Request) {
       );
     }
 
+    // Upsert the active context mapping
+    try {
+      await CompanyBrain.updateOne(
+        { _id: `active_context_${roomId}` },
+        { $set: { company_id: companyId } },
+        { upsert: true }
+      );
+    } catch (err) {
+      console.error('[Chat API] Error saving active context mapping to MongoDB:', err);
+    }
+
     const userMessageObj = {
       id: `msg_user_${Date.now()}`,
       sender: 'user',
@@ -95,12 +118,14 @@ export async function POST(request: Request) {
     state.current_session.chat_history.push(userMessageObj);
 
     try {
-      state._id = "nexus_labs_brain";
-      await CompanyBrain.replaceOne({ _id: "nexus_labs_brain" }, state, { upsert: true });
+      state._id = docId;
+      await CompanyBrain.replaceOne({ _id: docId }, state, { upsert: true });
     } catch (err) {
       console.error('[Chat API] Error saving state to MongoDB:', err);
     }
-    await saveLocalFallback(dbPath, state);
+    if (companyId === 'nexus_labs') {
+      await saveLocalFallback(dbPath, state);
+    }
 
     // Send direct HTTP call to Band room API
     let connieId = process.env.CONNIE_AGENT_ID || '';

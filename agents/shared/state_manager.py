@@ -94,15 +94,33 @@ class StateManager:
             json.dump(serialized_state, file, indent=2)
 
     @classmethod
-    def load_state(cls) -> dict:
+    def load_state(cls, room_id=None) -> dict:
         """Loads the current Company Brain state from MongoDB (with local JSON fallback)."""
         collection = cls.get_mongo_collection()
         if collection is not None:
             try:
-                state = collection.find_one({"_id": "nexus_labs_brain"})
+                state = None
+                # First, check if there is an active context mapping for this room_id
+                if room_id:
+                    active_context = collection.find_one({"_id": f"active_context_{room_id}"})
+                    if active_context and active_context.get("company_id"):
+                        company_id = active_context.get("company_id")
+                        doc_id = "nexus_labs_brain" if company_id == "nexus_labs" else f"company_brain_{company_id}"
+                        state = collection.find_one({"_id": doc_id})
+                        if state:
+                            print(f"[StateManager] Loaded state for active company '{company_id}' from room '{room_id}'")
+                
+                # Fallback to direct room_id match
+                if not state and room_id:
+                    state = collection.find_one({"room_id": room_id})
+                
+                # Fallback to default
+                if not state:
+                    state = collection.find_one({"_id": "nexus_labs_brain"})
+                
                 if state:
                     return state
-                else:
+                elif not room_id:
                     print("[StateManager] nexus_labs_brain document not found in MongoDB. Initializing state...")
                     state = cls.compile_dynamic_company_brain()
                     state["_id"] = "nexus_labs_brain"
@@ -127,29 +145,31 @@ class StateManager:
     @classmethod
     def save_state(cls, state: dict) -> None:
         """Saves the Company Brain state back to MongoDB and synchronizes the local JSON file."""
-        state["_id"] = "nexus_labs_brain"
+        doc_id = state.get("_id", "nexus_labs_brain")
+        state["_id"] = doc_id
         
         collection = cls.get_mongo_collection()
         if collection is not None:
             try:
-                collection.replace_one({"_id": "nexus_labs_brain"}, state, upsert=True)
+                collection.replace_one({"_id": doc_id}, state, upsert=True)
             except Exception as e:
                 print(f"[StateManager] Error saving to MongoDB: {e}.")
 
-        cls.save_local_state(state)
+        if doc_id == "nexus_labs_brain":
+            cls.save_local_state(state)
 
     @classmethod
-    def update_agent_output(cls, session_id: str, agent_key: str, output_data: any) -> None:
+    def update_agent_output(cls, session_id: str, agent_key: str, output_data: any, room_id=None) -> None:
         """Updates a specific agent's output in the current session state."""
-        state = cls.load_state()
+        state = cls.load_state(room_id=room_id)
         state["current_session"]["session_id"] = session_id
         state["current_session"]["agent_outputs"][agent_key] = output_data
         cls.save_state(state)
 
     @classmethod
-    def add_rejection_memo(cls, session_id: str, rejection_data: dict) -> None:
+    def add_rejection_memo(cls, session_id: str, rejection_data: dict, room_id=None) -> None:
         """Appends a rejection critique memo to the current session state."""
-        state = cls.load_state()
+        state = cls.load_state(room_id=room_id)
         state["current_session"]["session_id"] = session_id
         if "rejections_and_memos" not in state["current_session"]:
             state["current_session"]["rejections_and_memos"] = []
@@ -157,18 +177,18 @@ class StateManager:
         cls.save_state(state)
 
     @classmethod
-    def update_approval_status(cls, session_id: str, status: str) -> None:
+    def update_approval_status(cls, session_id: str, status: str, room_id=None) -> None:
         """Updates the session approval status."""
-        state = cls.load_state()
+        state = cls.load_state(room_id=room_id)
         state["current_session"]["session_id"] = session_id
         state["current_session"]["agent_outputs"]["approval_status"] = status
         cls.save_state(state)
 
     @classmethod
-    def initialize_new_session(cls, session_id: str, trigger_source: str, raw_inputs: dict) -> dict:
+    def initialize_new_session(cls, session_id: str, trigger_source: str, raw_inputs: dict, room_id=None) -> dict:
         """Initializes a brand new session with default empty states in the database."""
         from datetime import datetime, timezone
-        state = cls.load_state()
+        state = cls.load_state(room_id=room_id)
         
         # Archive the existing current_session to session_history if it exists and has a session_id
         if "current_session" in state and state["current_session"].get("session_id"):

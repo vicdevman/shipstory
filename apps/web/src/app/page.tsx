@@ -51,7 +51,8 @@ import {
   Save,
   Trash2,
   Plus,
-  Star
+  Star,
+  HatGlasses
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -603,9 +604,26 @@ export default function Dashboard() {
 
   // Editable drafts local state
   const [editedTwitter, setEditedTwitter] = useState('');
+  const [editedLinkedIn, setEditedLinkedIn] = useState('');
   const [editedChangelog, setEditedChangelog] = useState('');
   const [editedNewsletter, setEditedNewsletter] = useState('');
   const [savingDrafts, setSavingDrafts] = useState(false);
+
+  // Ref based state locking to prevent polling from reverting user draft edits
+  const lastSyncedDraftsRef = useRef<any>(null);
+  const lastSyncedSessionIdRef = useRef<string | null>(null);
+
+  // Draft view mode state (edit vs markdown rich preview)
+  const [draftModes, setDraftModes] = useState<Record<string, 'edit' | 'preview'>>({
+    twitter: 'preview',
+    linkedin: 'preview',
+    changelog: 'preview',
+    newsletter: 'preview',
+  });
+
+  // State for rejection actions and copy feedback
+  const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [rejectingRec, setRejectingRec] = useState<string | null>(null);
 
   // Layout View Switcher
   const [view, setView] = useState<'canvas' | 'startup' | 'outputs'>('canvas');
@@ -658,10 +676,31 @@ export default function Dashboard() {
   const [ghCommits, setGhCommits] = useState<any[]>([]);
   const [loadingCommits, setLoadingCommits] = useState(false);
   const [ghCommitsError, setGhCommitsError] = useState('');
-  // ── Modal tab: 'explore' | 'workspace' | 'custom'
-  const [modalTab, setModalTab] = useState<'explore' | 'workspace' | 'custom'>('explore');
+  // ── Modal tab: 'explore' | 'custom' | 'campaign'
+  const [modalTab, setModalTab] = useState<'explore' | 'custom' | 'campaign'>('explore');
   const [customCommitMsg, setCustomCommitMsg] = useState('');
   const [customFiles, setCustomFiles] = useState('');
+  const [customCampaignPrompt, setCustomCampaignPrompt] = useState('');
+
+  // ── Multi-Tenant Startup State ──────────────────────────────────────────────
+  const [companyId, setCompanyId] = useState('nexus_labs');
+  const [startupList, setStartupList] = useState<Array<{ id: string; name: string }>>([
+    { id: 'nexus_labs', name: 'Nexus Labs' },
+    { id: 'orbit_sync', name: 'Orbit Sync' },
+    { id: 'saas_flow', name: 'SaaS Flow' },
+    { id: 'documind_ai', name: 'DocuMind AI' }
+  ]);
+  const [workspaceTab, setWorkspaceTab] = useState<'brand' | 'repos' | 'documents' | 'research'>('brand');
+
+  // ── Onboarding website URL extraction state ─────────────────────────────────
+  const [onboardUrl, setOnboardUrl] = useState('');
+  const [onboarding, setOnboarding] = useState(false);
+
+  // ── Documents checklist editing state ────────────────────────────────────────
+  const [documents, setDocuments] = useState<Record<string, string>>({});
+  const [expandedDocKey, setExpandedDocKey] = useState<string | null>(null);
+  const [docDraftContent, setDocDraftContent] = useState<Record<string, string>>({});
+  const [savingDocs, setSavingDocs] = useState<string | null>(null);
 
   // ── Brand context editor state ──────────────────────────────────────────────
   const [brandName, setBrandName] = useState('');
@@ -691,12 +730,42 @@ export default function Dashboard() {
 
   useEffect(() => {
     setMounted(true);
+    if (typeof window !== 'undefined') {
+      const savedCompanyId = localStorage.getItem('shipstory_company_id');
+      if (savedCompanyId) {
+        setCompanyId(savedCompanyId);
+      }
+      const savedList = localStorage.getItem('shipstory_startup_list');
+      if (savedList) {
+        try {
+          setStartupList(JSON.parse(savedList));
+        } catch (e) {}
+      }
+    }
   }, []);
+
+  const handleSelectCompany = (val: string) => {
+    if (val === 'CREATE_NEW') {
+      const name = prompt('Enter new Startup name:');
+      if (name && name.trim()) {
+        const id = name.trim().toLowerCase().replace(/[^a-z0-9]+/g, '_');
+        const newList = [...startupList, { id, name: name.trim() }];
+        setStartupList(newList);
+        setCompanyId(id);
+        localStorage.setItem('shipstory_startup_list', JSON.stringify(newList));
+        localStorage.setItem('shipstory_company_id', id);
+        showToast(`Created and loaded startup "${name.trim()}"`);
+      }
+    } else {
+      setCompanyId(val);
+      localStorage.setItem('shipstory_company_id', val);
+    }
+  };
 
   // Poll state every 1.5 seconds
   const fetchState = useCallback(async () => {
     try {
-      const res = await fetch('/api/brain');
+      const res = await fetch(`/api/brain?company_id=${companyId}`);
       if (!res.ok) {
         throw new Error(`API returned ${res.status}`);
       }
@@ -715,7 +784,7 @@ export default function Dashboard() {
     } catch (err) {
       console.error('Error fetching brain state:', err);
     }
-  }, []);
+  }, [companyId]);
 
   useEffect(() => {
     fetchState();
@@ -759,17 +828,29 @@ export default function Dashboard() {
     ? (state?.session_history || []).find((s: any) => s.session_id === selectedSessionId) || state?.current_session || {}
     : state?.current_session || {};
 
-  // Initialize drafts when session changes
+  // Initialize drafts when session changes or drafts are loaded from the server
   useEffect(() => {
     const drafts = session?.agent_outputs?.gigi_content_drafts;
-    if (drafts) {
-      setEditedTwitter(drafts.twitter || '');
-      setEditedChangelog(drafts.changelog || '');
-      setEditedNewsletter(drafts.newsletter || '');
-    } else {
-      setEditedTwitter('');
-      setEditedChangelog('');
-      setEditedNewsletter('');
+    const sessionId = session?.session_id;
+    
+    const sessionChanged = lastSyncedSessionIdRef.current !== sessionId;
+    const draftsChanged = JSON.stringify(drafts) !== JSON.stringify(lastSyncedDraftsRef.current);
+    
+    if (sessionChanged || draftsChanged) {
+      lastSyncedSessionIdRef.current = sessionId || null;
+      lastSyncedDraftsRef.current = drafts || null;
+      
+      if (drafts) {
+        setEditedTwitter(drafts.twitter || '');
+        setEditedLinkedIn(drafts.linkedin || '');
+        setEditedChangelog(drafts.changelog || '');
+        setEditedNewsletter(drafts.newsletter || '');
+      } else {
+        setEditedTwitter('');
+        setEditedLinkedIn('');
+        setEditedChangelog('');
+        setEditedNewsletter('');
+      }
     }
   }, [session?.session_id, session?.agent_outputs?.gigi_content_drafts]);
 
@@ -782,8 +863,10 @@ export default function Dashboard() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           action: 'update_drafts',
+          company_id: companyId,
           drafts: {
             twitter: editedTwitter,
+            linkedin: editedLinkedIn,
             changelog: editedChangelog,
             newsletter: editedNewsletter,
           }
@@ -791,22 +874,25 @@ export default function Dashboard() {
       });
       if (res.ok) {
         await fetchState();
-        alert('Drafts successfully saved and pushed to database!');
+        showToast('✓ Drafts successfully saved and pushed to database!');
       } else {
-        alert('Failed to save drafts.');
+        showToast('Failed to save drafts.', 'error');
       }
     } catch (err) {
       console.error('Error saving drafts:', err);
+      showToast('Error saving drafts.', 'error');
     } finally {
       setSavingDrafts(false);
     }
   };
 
   // ── Copy helper with toast feedback ──────────────────────────────────────────
-  const handleCopy = useCallback(async (text: string, label: string) => {
+  const handleCopy = useCallback(async (text: string, label: string, buttonId: string) => {
     try {
       await navigator.clipboard.writeText(text);
       showToast(`✓ ${label} copied to clipboard!`);
+      setCopiedId(buttonId);
+      setTimeout(() => setCopiedId(null), 2000);
     } catch (err) {
       console.error('Failed to copy: ', err);
       showToast('Failed to copy to clipboard', 'error');
@@ -875,6 +961,7 @@ export default function Dashboard() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           source: 'GITHUB_COMMIT',
+          company_id: companyId,
           commit_message: commit.commit.message,
           changed_files: changedFiles.length > 0 ? changedFiles : ['unknown'],
           commit_sha: commit.sha?.slice(0, 7),
@@ -890,7 +977,7 @@ export default function Dashboard() {
     } finally {
       setTriggering(false);
     }
-  }, [ghToken, fetchState, showToast]);
+  }, [ghToken, companyId, fetchState, showToast]);
 
   const triggerWithCustomCommit = useCallback(async () => {
     if (!customCommitMsg.trim()) { showToast('Please enter a commit message', 'error'); return; }
@@ -905,6 +992,7 @@ export default function Dashboard() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           source: 'GITHUB_COMMIT',
+          company_id: companyId,
           commit_message: customCommitMsg.trim(),
           changed_files: files.length > 0 ? files : ['unknown'],
         }),
@@ -918,10 +1006,35 @@ export default function Dashboard() {
     }
   }, [customCommitMsg, customFiles, fetchState, showToast]);
 
+  const triggerWithCampaignConcept = useCallback(async () => {
+    if (!customCampaignPrompt.trim()) { showToast('Please enter a campaign topic or strategic question', 'error'); return; }
+    setShowGitHubModal(false);
+    setModalTab('explore'); // reset for next open
+    setSelectedSessionId(null);
+    setTriggering(true);
+    try {
+      await fetch('/api/webhook', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          source: 'MANUAL_CAMPAIGN',
+          company_id: companyId,
+          concept_prompt: customCampaignPrompt.trim(),
+        }),
+      });
+      await fetchState();
+    } catch (err) {
+      console.error('Error triggering campaign concept:', err);
+      showToast('Failed to trigger pipeline', 'error');
+    } finally {
+      setTriggering(false);
+    }
+  }, [customCampaignPrompt, companyId, fetchState, showToast]);
+
   // ── Brand context: load from /api/settings ────────────────────────────────
   const loadBrandContext = useCallback(async () => {
     try {
-      const res = await fetch('/api/settings');
+      const res = await fetch(`/api/settings?company_id=${companyId}`);
       if (!res.ok) return;
       const data = await res.json();
       const cm = data.company_metadata || {};
@@ -933,15 +1046,16 @@ export default function Dashboard() {
       setBrandKeywords((cm.security_filters?.restricted_keywords || []).join(', '));
       setBrandVoice(cm.raw_brand_voice_constraints || '');
       setConnectedRepos(cm.connected_repos || []);
+      setDocuments(oa.documents || {});
     } catch (err) {
       console.error('[Brand] Failed to load brand context:', err);
     }
-  }, []);
+  }, [companyId]);
 
-  // Load brand when modal opens
+  // Load brand details when companyId changes
   useEffect(() => {
-    if (showGitHubModal) loadBrandContext();
-  }, [showGitHubModal, loadBrandContext]);
+    loadBrandContext();
+  }, [companyId, loadBrandContext]);
 
   // ── Brand context: save to /api/settings ──────────────────────────────────
   const saveBrandContext = useCallback(async () => {
@@ -953,6 +1067,7 @@ export default function Dashboard() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           action: 'update_brand',
+          company_id: companyId,
           name: brandName.trim(),
           value_proposition: brandValueProp.trim(),
           target_persona: brandPersona.trim(),
@@ -974,7 +1089,7 @@ export default function Dashboard() {
     } finally {
       setSavingBrand(false);
     }
-  }, [brandName, brandValueProp, brandPersona, brandTone, brandKeywords, brandVoice, fetchState, showToast]);
+  }, [companyId, brandName, brandValueProp, brandPersona, brandTone, brandKeywords, brandVoice, fetchState, showToast]);
 
   // ── Connected Repos Management actions ─────────────────────────────────────
   const addRepo = async () => {
@@ -989,6 +1104,7 @@ export default function Dashboard() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           action: 'connect_repo',
+          company_id: companyId,
           url: newRepoUrl.trim(),
           description: newRepoDesc.trim(),
         }),
@@ -1017,6 +1133,7 @@ export default function Dashboard() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           action: 'remove_repo',
+          company_id: companyId,
           id,
         }),
       });
@@ -1041,6 +1158,7 @@ export default function Dashboard() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           action: 'set_primary_repo',
+          company_id: companyId,
           id,
         }),
       });
@@ -1053,6 +1171,126 @@ export default function Dashboard() {
       }
     } catch (err) {
       showToast('Error updating primary repository', 'error');
+    }
+  };
+
+  // ── AI Document Prefill Helper ──────────────────────────────────────────────
+  const handleAIPrefillDoc = (key: string) => {
+    const startupName = brandName || 'My Startup';
+    const vp = brandValueProp || 'A growth product.';
+    const tp = brandPersona || 'Developers';
+    let template = '';
+    
+    if (key === 'start_here') {
+      template = `# START HERE — ${startupName}\n\nWelcome to ${startupName}! This document serves as the entry point for understanding our project codebase and architecture.\n\n## Core Value Prop\n${vp}\n\n## Getting Started\n1. Install dependencies: \`npm install\`\n2. Set up local environment: \`cp .env.example .env.local\`\n3. Run dev server: \`npm run dev\``;
+    } else if (key === 'vision') {
+      template = `# Vision: ${startupName}\n\n## Core Mission\nTo solve core problems for ${tp} and deliver top tier productivity.\n\n## Market Opportunity\n${vp}\n\n## Strategic Goals\n- Acquire first 100 beta users\n- Achieve positive product sentiment`;
+    } else if (key === 'prd') {
+      template = `# Product Requirements Document (PRD)\n\n## 1. Overview\n${startupName} is designed to address latency and scalability challenges.\n\n## 2. Target User Persona\n- **Primary Persona**: ${tp}\n\n## 3. Key Features\n- Real-time indexing gateway\n- Local-first sqlite replication layer\n- Unified compliance filter`;
+    } else if (key === 'business_model') {
+      template = `# Business Model Canvas — ${startupName}\n\n## Value Proposition\n${vp}\n\n## Revenue Streams\n- **Developer Tier**: Free ($0/mo)\n- **Startup Core**: $29/mo (gated features)\n- **Enterprise Scale**: Custom pricing`;
+    } else if (key === 'roadmap') {
+      template = `# Roadmap & Milestones — ${startupName}\n\n## Q1: Core Sync Engine\n- [x] PouchDB sharding gateway\n- [x] Connection pool clustering\n\n## Q2: Advanced Security Filter\n- [ ] Restricted keywords auditor\n- [ ] SOC2 audit checks integration`;
+    } else if (key === 'architecture') {
+      template = `# System Architecture — ${startupName}\n\n## Core Technology Stack\n- Frontend: React / NextJS / TailwindCSS\n- Backend: Go / REST API / WebSockets\n- Database: PostgreSQL & Redis caching\n\n## System Architecture Diagram\n- Client app connects to REST Gateway\n- Writes sync directly to primary database\n- Webhooks notify growth agents`;
+    } else if (key === 'api_documentation') {
+      template = `# API Reference Guide — ${startupName}\n\n## Authentication\nAll requests must contain an \`Authorization: Bearer <token>\` header.\n\n## Endpoints\n### \`GET /api/v1/status\`\nReturns system status and active configuration.\n\n### \`POST /api/v1/sync\`\nSynchronizes local database changes.`;
+    } else if (key === 'gtm_strategy') {
+      template = `# Go-To-Market (GTM) Strategy\n\n## Brand Positioning\n${vp}\n\n## Launch Channels\n- **Developer Forums**: Hacker News, Reddit (r/webdev), ProductHunt\n- **Target Audience Outreach**: Direct campaigns for ${tp}\n- **Changelog Distribution**: Automated social broadcasts`;
+    } else if (key === 'brand_guidelines') {
+      template = `Brand Guidelines & Design Assets:\n- Primary Color: Slate Blue (#2563EB)\n- Secondary Accent: Cool Indigo (#7C3AED)\n- Brand Font: OutFit, Sans-serif\n- Tone of Voice: Professional, concise, developer-centric`;
+    } else if (key === 'financial_model') {
+      template = `Financial Projections Summary (Excel Ref):\n- Year 1 Hosting Costs: $1,200\n- Year 1 Marketing: $5,000\n- Target Active Customers: 500 accounts\n- Target Monthly Recurring Revenue (MRR): $15,000`;
+    } else if (key === 'sops') {
+      template = `# Standard Operating Procedures (SOPs)\n\n## 1. Feature Development\n- Create a feature branch off main\n- Write unit tests for new service models\n- Submit PR and await peer code review\n\n## 2. Release Management\n- Pushing to main branch triggers the webhook and runs the growth pipeline.`;
+    } else if (key === 'decision_log') {
+      template = `# Decision Log\n\n### [DEC-001] Migrate from PostgreSQL to SQLite replica\n- **Rationale**: Local-first query syncing needs local databases.\n- **Status**: Approved & Implemented.`;
+    } else {
+      template = `# Placeholder Doc\n\nPlaceholder documentation context for ${startupName}.`;
+    }
+
+    setDocDraftContent(prev => ({
+      ...prev,
+      [key]: template
+    }));
+    showToast(`✓ Generated starter template! Save to apply.`);
+  };
+
+  // ── Save Onboarding Document ────────────────────────────────────────────────
+  const handleSaveDocument = async (docKey: string, content: string) => {
+    setSavingDocs(docKey);
+    try {
+      const res = await fetch('/api/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'update_documents',
+          company_id: companyId,
+          documents: {
+            [docKey]: content
+          }
+        }),
+      });
+      if (res.ok) {
+        showToast(`✓ Document saved successfully`);
+        // Refresh local state
+        await fetchState();
+      } else {
+        showToast('Failed to save document', 'error');
+      }
+    } catch (err) {
+      showToast('Failed to save document', 'error');
+    } finally {
+      setSavingDocs(null);
+    }
+  };
+
+  // ── AI Website Onboarding Extractor ─────────────────────────────────────────
+  const handleAutoOnboard = async () => {
+    if (!onboardUrl.trim()) {
+      showToast('Please enter a website or GitHub URL', 'error');
+      return;
+    }
+    setOnboarding(true);
+    try {
+      const res = await fetch('/api/onboard', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url: onboardUrl.trim() }),
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        const ext = data.extracted_data || {};
+        if (ext.name) setBrandName(ext.name);
+        if (ext.value_proposition) setBrandValueProp(ext.value_proposition);
+        if (ext.target_persona) setBrandPersona(ext.target_persona);
+        if (ext.tone) setBrandTone(ext.tone);
+        if (ext.raw_brand_voice_constraints) setBrandVoice(ext.raw_brand_voice_constraints);
+        
+        // Save extracted brand to settings automatically
+        await fetch('/api/settings', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action: 'update_brand',
+            company_id: companyId,
+            name: ext.name || brandName,
+            value_proposition: ext.value_proposition || brandValueProp,
+            target_persona: ext.target_persona || brandPersona,
+            tone: ext.tone || brandTone,
+            raw_brand_voice_constraints: ext.raw_brand_voice_constraints || brandVoice,
+          })
+        });
+
+        showToast('✓ AI successfully extracted and saved brand profile!');
+        await fetchState();
+      } else {
+        showToast(data.error || 'Failed to extract startup context', 'error');
+      }
+    } catch (err) {
+      showToast('Error extracting startup context', 'error');
+    } finally {
+      setOnboarding(false);
     }
   };
 
@@ -1175,22 +1413,27 @@ export default function Dashboard() {
 
         // 5a. Marshall Research Node
         else if (node.id === 'marshall') {
-          const recs = state.evolutionary_feedback_loop?.active_recommendations || [];
           const marshallRec = outputs.marshall_recommendation;
-          const hasRecs = recs.length > 0 || !!marshallRec;
+          const hasCurrentRec = !!(marshallRec && marshallRec.summary);
           if (status === 'PROCESSING') {
-            nodeStatus = hasRecs ? 'success' : 'running';
-          } else if (hasRecs) {
+            nodeStatus = hasCurrentRec ? 'success' : 'running';
+          } else if (hasCurrentRec) {
             nodeStatus = 'success';
+          } else {
+            nodeStatus = 'disabled';
           }
-          // Prefer live evolutionary_feedback_loop rec, fall back to agent_outputs.marshall_recommendation
-          const latestRec = recs[recs.length - 1] || marshallRec;
           fields = [
             { 
               label: 'Strategic Pivot', 
-              value: latestRec 
-                ? `[ROADMAP_PIVOT] ${latestRec.summary}\nRationale: ${latestRec.rationale}\nImpact Score: ${latestRec.strategic_impact_score}/10` 
-                : (nodeStatus === 'running' ? 'Scanning competitor pricing & gaps...' : 'Awaiting session start...')
+              value: hasCurrentRec 
+                ? `[ROADMAP_PIVOT] ${marshallRec.summary}\nRationale: ${marshallRec.rationale}\nImpact Score: ${marshallRec.strategic_impact_score}/10` 
+                : (status === 'PROCESSING' ? 'Scanning competitor pricing & gaps...' : 'Awaiting session start...')
+            },
+            {
+              label: 'Sources & References',
+              value: marshallRec?.sources && marshallRec.sources.length > 0 
+                ? marshallRec.sources.map((s: string) => `- [${s}](${s})`).join('\n') 
+                : (hasCurrentRec ? 'No external sources recorded.' : 'Waiting for research logs...')
             }
           ];
         }
@@ -1286,9 +1529,18 @@ export default function Dashboard() {
         let strokeColor = '#93C5FD'; // blue-300 default
 
         if (status === 'PROCESSING') {
-          if (edge.id === 'e-trigger-devin' || edge.id === 'e-trigger-priscilla' || edge.id === 'e-trigger-marshall') {
+          const isManual = session.trigger_source === 'MANUAL_CAMPAIGN';
+          if (edge.id === 'e-trigger-devin') {
+            isAnimated = !isManual;
+            strokeColor = isAnimated ? '#3B82F6' : '#93C5FD';
+          }
+          if (edge.id === 'e-trigger-priscilla') {
+            isAnimated = !isManual;
+            strokeColor = isAnimated ? '#3B82F6' : '#93C5FD';
+          }
+          if (edge.id === 'e-trigger-marshall') {
             isAnimated = true;
-            strokeColor = edge.id === 'e-trigger-marshall' ? '#06B6D4' : '#3B82F6';
+            strokeColor = '#06B6D4';
           }
           if (edge.id === 'e-marshall-priscilla') {
             const recs = state.evolutionary_feedback_loop?.active_recommendations || [];
@@ -1399,13 +1651,37 @@ export default function Dashboard() {
       await fetch('/api/approve', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'approve_recommendation', recommendation_id: recId }),
+        body: JSON.stringify({ action: 'approve_recommendation', company_id: companyId, recommendation_id: recId }),
       });
       await fetchState();
     } catch (err) {
       console.error('Error approving recommendation:', err);
     } finally {
       setApprovingRec(null);
+    }
+  };
+
+  // Strategic roadmap pivot rejection
+  const handleRejectRec = async (recId: string) => {
+    if (isViewingHistory) return;
+    setRejectingRec(recId);
+    try {
+      const res = await fetch('/api/approve', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'reject_recommendation', company_id: companyId, recommendation_id: recId }),
+      });
+      if (res.ok) {
+        await fetchState();
+        showToast('✓ Pivot recommendation rejected/dismissed.');
+      } else {
+        showToast('Failed to reject recommendation', 'error');
+      }
+    } catch (err) {
+      console.error('Error rejecting recommendation:', err);
+      showToast('Error rejecting recommendation', 'error');
+    } finally {
+      setRejectingRec(null);
     }
   };
 
@@ -1417,7 +1693,7 @@ export default function Dashboard() {
       await fetch('/api/approve', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'ship_marketing' }),
+        body: JSON.stringify({ action: 'ship_marketing', company_id: companyId }),
       });
       await fetchState();
     } catch (err) {
@@ -1447,7 +1723,7 @@ export default function Dashboard() {
       const res = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: messageToSend }),
+        body: JSON.stringify({ message: messageToSend, company_id: companyId }),
       });
       const data = await res.json();
       if (data.success) {
@@ -1508,16 +1784,25 @@ export default function Dashboard() {
         style={{ paddingLeft: '24px', paddingRight: '24px' }}
       >
         <div className="flex items-center gap-2">
-          {/* <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-blue-600 text-white font-bold text-base">S</div> */}
           <img src="/logo-nobg.png" alt="Logo" width={22} height={22}/>
           <div className="flex items-center gap-2">
             <span className="text-sm font-semibold tracking-tight text-gray-900">ShipStory /</span>
-            <span 
-              className="text-xs font-mono font-bold bg-gray-100 text-gray-600 rounded uppercase"
-              style={{ padding: '3px 10px' }}
-            >
-              {metadata.name || 'Startup'}
-            </span>
+            
+            {/* Multi-tenant Startup Switcher Dropdown */}
+            <div className="relative flex items-center">
+              <select
+                value={companyId}
+                onChange={(e) => handleSelectCompany(e.target.value)}
+                className="text-xs font-mono font-bold bg-gray-100 hover:bg-gray-200 border border-transparent focus:border-gray-300 focus:ring-0 text-gray-700 rounded outline-none cursor-pointer uppercase py-1 px-2.5 pr-8 appearance-none"
+                style={{ paddingRight: '2rem' }}
+              >
+                {startupList.map(s => (
+                  <option key={s.id} value={s.id}>{s.name}</option>
+                ))}
+                <option value="CREATE_NEW" className="text-blue-600 font-bold">+ Create Startup</option>
+              </select>
+              <ChevronDown className="w-3.5 h-3.5 text-gray-500 absolute right-2.5 top-2 pointer-events-none" />
+            </div>
           </div>
         </div>
 
@@ -1574,25 +1859,41 @@ export default function Dashboard() {
             </div>
           )}
 
-          {/* Project Workspace Button */}
+          {/* Persistent Workspace Navigation Button */}
+          <button
+            onClick={() => {
+              setView('startup');
+              loadBrandContext();
+            }}
+            className={`flex items-center gap-2 h-9 border text-xs font-semibold transition-all duration-200 cursor-pointer rounded-lg shadow-sm ${
+              view === 'startup'
+                ? 'bg-blue-50 text-blue-700 border-blue-200'
+                : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50'
+            }`}
+            style={{ padding: '8px 16px' }}
+            title="Open Startup Workspace Dashboard"
+          >
+            <Building2 className="w-3.5 h-3.5" />
+            <span>Workspace Dashboard</span>
+          </button>
+
+          {/* Trigger Pipeline modal button */}
           <button
             onClick={() => {
               setShowGitHubModal(true);
-              // Fallback to load brand context just in case, plus set initial tab
-              loadBrandContext();
-              setModalTab(brandName ? 'explore' : 'workspace');
+              setModalTab('explore');
             }}
             disabled={triggering}
             className="flex items-center gap-2 h-9 bg-blue-600 text-white hover:bg-blue-700 cursor-pointer disabled:bg-blue-300 disabled:cursor-not-allowed font-semibold text-xs transition-all duration-200 border border-blue-600 rounded-lg shadow-sm"
             style={{ padding: '8px 16px' }}
-            title="Open Project Workspace to configure startup profiles and repositories"
+            title="Trigger Campaign Analysis Pipeline"
           >
             {triggering ? (
               <Loader2 className="w-3.5 h-3.5 animate-spin" />
             ) : (
-              <Building2 className="w-3.5 h-3.5" />
+              <Zap className="w-3.5 h-3.5" />
             )}
-            {triggering ? 'Starting...' : 'Open Workspace'}
+            {triggering ? 'Starting...' : 'Trigger Pipeline'}
           </button>
         </div>
       </header>
@@ -1642,13 +1943,16 @@ export default function Dashboard() {
                     </button>
 
                     <button
-                      onClick={() => setView('startup')}
+                      onClick={() => {
+                        setView('startup');
+                        loadBrandContext();
+                      }}
                       className={`flex items-center gap-2.5 w-full text-left rounded-lg text-xs font-semibold px-3 py-2 transition-colors hover:bg-[#1A1A1E] ${
                         view === 'startup' ? 'bg-[#2563EB]/15 text-blue-400 border border-blue-500/20' : 'text-gray-300 border border-transparent'
                       }`}
                     >
-                      <Cpu className="w-4 h-4 shrink-0" />
-                      <span>Startup Details</span>
+                      <Building2 className="w-4 h-4 shrink-0" />
+                      <span>Startup Workspace</span>
                     </button>
 
                     <button
@@ -1800,126 +2104,502 @@ export default function Dashboard() {
             </div>
           )}
 
-          {/* B. STARTUP PROFILE VIEW (Replaces canvas view) */}
+          {/* B. STARTUP WORKSPACE VIEW (Persistent Dashboard UI) */}
           {view === 'startup' && (
-            <div className="w-full h-full overflow-y-auto bg-gray-50/50 p-6 flex flex-col gap-6" style={{ padding: '24px' }}>
-              
-              {/* Overview Header */}
-              <div className="border-b border-gray-200 pb-4 flex justify-between items-center">
+            <div className="w-full h-full overflow-hidden flex flex-col bg-gray-50">
+              {/* Header with Sub-Tabs */}
+              <div className="border-b border-gray-200 bg-white px-6 py-4 flex justify-between items-center shrink-0">
                 <div>
-                  <h2 className="text-xl font-bold tracking-tight text-gray-900 font-mono">Startup Brain Overview</h2>
-                  <p className="text-xs text-gray-500 mt-1">Direct representation of metadata loaded from company_brain_db.json</p>
+                  <h2 className="text-lg font-bold tracking-tight text-gray-900 font-mono">Startup Workspace</h2>
+                  <p className="text-xs text-gray-500 mt-0.5">Manage brand voice, connected codebases, onboarding documents, and strategic intelligence logs.</p>
                 </div>
-                <button 
-                  onClick={() => setView('canvas')} 
-                  className="flex items-center gap-1 text-xs font-bold text-blue-600 hover:text-blue-700 hover:underline"
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => setView('canvas')}
+                    className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-gray-600 hover:text-gray-900 border border-gray-200 rounded-lg bg-white"
+                  >
+                    <span>Back to Canvas</span>
+                    <ArrowRight className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              </div>
+
+              {/* Sub-Tabs Nav */}
+              <div className="flex border-b border-gray-200 bg-white px-6 shrink-0 overflow-x-auto scrollbar-thin whitespace-nowrap">
+                <button
+                  onClick={() => setWorkspaceTab('brand')}
+                  className={`px-4 py-3 text-xs font-bold font-mono border-b-2 transition-colors shrink-0 ${
+                    workspaceTab === 'brand' ? 'border-blue-600 text-blue-700' : 'border-transparent text-gray-500 hover:text-gray-800'
+                  }`}
                 >
-                  <span>Go to Canvas</span>
-                  <ArrowRight className="w-3.5 h-3.5" />
+                  Brand Profile & Onboarding
+                </button>
+                <button
+                  onClick={() => setWorkspaceTab('repos')}
+                  className={`px-4 py-3 text-xs font-bold font-mono border-b-2 transition-colors shrink-0 ${
+                    workspaceTab === 'repos' ? 'border-blue-600 text-blue-700' : 'border-transparent text-gray-500 hover:text-gray-800'
+                  }`}
+                >
+                  Repositories & Webhooks
+                </button>
+                <button
+                  onClick={() => setWorkspaceTab('documents')}
+                  className={`px-4 py-3 text-xs font-bold font-mono border-b-2 transition-colors shrink-0 ${
+                    workspaceTab === 'documents' ? 'border-blue-600 text-blue-700' : 'border-transparent text-gray-500 hover:text-gray-800'
+                  }`}
+                >
+                  Onboarding Documents Checklist ({Object.keys(documents).filter(k => !!documents[k]).length}/12)
+                </button>
+                <button
+                  onClick={() => setWorkspaceTab('research')}
+                  className={`px-4 py-3 text-xs font-bold font-mono border-b-2 transition-colors shrink-0 ${
+                    workspaceTab === 'research' ? 'border-blue-600 text-blue-700' : 'border-transparent text-gray-500 hover:text-gray-800'
+                  }`}
+                >
+                  Strategic Research Console
                 </button>
               </div>
 
-              {/* Identity & Pitch profile cards */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                <div className="bg-white border border-gray-200 rounded-xl p-5" style={{ padding: '20px' }}>
-                  <span className="text-[10px] uppercase font-bold text-blue-600 font-mono tracking-widest">Startup Identity</span>
-                  <h3 className="text-lg font-bold text-gray-900 mt-1">{metadata.name || 'Nexus Labs'}</h3>
-                  <div className="mt-4 flex flex-col gap-3">
-                    <div>
-                      <span className="text-[9px] uppercase font-bold text-gray-400 font-mono">Value Proposition</span>
-                      <p className="text-xs text-gray-700 mt-0.5 leading-relaxed font-mono">{metadata.value_proposition || 'N/A'}</p>
-                    </div>
-                    <div>
-                      <span className="text-[9px] uppercase font-bold text-gray-400 font-mono">Target Customer Persona</span>
-                      <p className="text-xs text-gray-700 mt-0.5 leading-relaxed font-mono">{metadata.target_persona || 'N/A'}</p>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="bg-white border border-gray-200 rounded-xl p-5" style={{ padding: '20px' }}>
-                  <span className="text-[10px] uppercase font-bold text-purple-600 font-mono tracking-widest">Investor Deck Abstract</span>
-                  <p className="text-xs text-gray-700 leading-relaxed font-mono mt-3 whitespace-pre-wrap">{assets.pitch_deck_summary || 'N/A'}</p>
-                </div>
-              </div>
-
-              {/* Milestones & Progress */}
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                
-                {/* Active Milestones list */}
-                <div className="md:col-span-2 bg-white border border-gray-200 rounded-xl p-5" style={{ padding: '20px' }}>
-                  <span className="text-[10px] uppercase font-bold text-orange-600 font-mono tracking-widest">Active Roadmap Milestones</span>
-                  <ul className="mt-3 flex flex-col gap-2">
-                    {assets.active_milestones?.length > 0 ? (
-                      assets.active_milestones.map((milestone: string, idx: number) => (
-                        <li 
-                          key={idx} 
-                          className="flex items-center gap-3 bg-gray-50 border border-gray-100 rounded-lg text-xs text-gray-700 font-semibold font-mono"
-                          style={{ padding: '10px 14px' }}
+              {/* View Content (Scrollable Container) */}
+              <div className="flex-1 overflow-y-auto p-6">
+                {workspaceTab === 'brand' && (
+                  <div className="max-w-3xl flex flex-col gap-6 bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
+                    {/* Jina Auto-Extractor Section */}
+                    <div className="p-4 bg-blue-50/50 border border-blue-100 rounded-xl">
+                      <h4 className="text-xs font-bold text-blue-950 font-mono flex items-center gap-1.5">
+                        <Sparkles className="w-3.5 h-3.5 text-blue-600 animate-pulse" />
+                        AI Website Onboarding Extractor
+                      </h4>
+                      <p className="text-[11px] text-blue-700 font-mono mt-1 leading-relaxed">
+                        Enter a public website URL (landing page, GitHub readme, docs). We will use Jina Scraper and LLM extraction to automatically populate your brand profile!
+                      </p>
+                      <div className="flex gap-2 mt-3">
+                        <input
+                          type="text"
+                          value={onboardUrl}
+                          onChange={e => setOnboardUrl(e.target.value)}
+                          placeholder="e.g. https://my-startup.com"
+                          className="flex-1 bg-white border border-gray-200 rounded-lg px-3.5 py-2 text-xs font-mono text-gray-900 focus:outline-none focus:border-blue-500"
+                        />
+                        <button
+                          onClick={handleAutoOnboard}
+                          disabled={onboarding}
+                          className="flex items-center gap-1.5 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-300 disabled:cursor-not-allowed text-white text-xs font-bold px-4 py-2 rounded-lg transition-colors font-mono"
                         >
-                          <span className="w-5 h-5 rounded-full bg-green-100 text-green-700 flex items-center justify-center font-bold">✓</span>
-                          <span>{milestone}</span>
-                        </li>
-                      ))
-                    ) : (
-                      <div className="text-xs text-gray-400 font-mono py-2">No active milestones configured in database.</div>
-                    )}
-                  </ul>
-                </div>
+                          {onboarding ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
+                          <span>{onboarding ? 'Extracting...' : 'AI Extract Profile'}</span>
+                        </button>
+                      </div>
+                    </div>
 
-                {/* Progress Indicators */}
-                <div className="bg-white border border-gray-200 rounded-xl p-5" style={{ padding: '20px' }}>
-                  <span className="text-[10px] uppercase font-bold text-green-600 font-mono tracking-widest">Epic Progress Percentages</span>
-                  <div className="mt-4 flex flex-col gap-4">
-                    {Object.entries(assets.epic_progress_percentages || {}).map(([epicName, progress]: any) => (
-                      <div key={epicName} className="flex flex-col gap-1.5">
-                        <div className="flex justify-between text-xs font-mono text-gray-700">
-                          <span>{epicName}</span>
-                          <span className="font-bold text-gray-950">{progress}%</span>
+                    {/* Brand Profile Fields */}
+                    <div className="flex flex-col gap-4">
+                      <div className="flex flex-col gap-1.5">
+                        <label className="text-[10px] font-bold uppercase tracking-wider text-gray-400 font-mono">Company / Startup Name</label>
+                        <input
+                          type="text"
+                          value={brandName}
+                          onChange={e => setBrandName(e.target.value)}
+                          placeholder="e.g. Nexus Labs"
+                          className="bg-white border border-gray-200 rounded-lg px-4 py-2.5 text-xs text-slate-900 font-mono focus:outline-none focus:border-blue-500"
+                        />
+                      </div>
+
+                      <div className="flex flex-col gap-1.5">
+                        <label className="text-[10px] font-bold uppercase tracking-wider text-gray-400 font-mono">Value Proposition</label>
+                        <textarea
+                          value={brandValueProp}
+                          onChange={e => setBrandValueProp(e.target.value)}
+                          placeholder="What problem do you solve? Who for? What makes you different?"
+                          rows={2}
+                          className="bg-white border border-gray-200 rounded-lg px-4 py-3 text-xs text-slate-900 font-mono focus:outline-none focus:border-blue-500 resize-y min-h-[72px]"
+                        />
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-3">
+                        <div className="flex flex-col gap-1.5">
+                          <label className="text-[10px] font-bold uppercase tracking-wider text-gray-400 font-mono">Target Persona</label>
+                          <input
+                            type="text"
+                            value={brandPersona}
+                            onChange={e => setBrandPersona(e.target.value)}
+                            placeholder="e.g. Solo devs, lean startups"
+                            className="bg-white border border-gray-200 rounded-lg px-4 py-2.5 text-xs text-slate-900 font-mono focus:outline-none focus:border-blue-500"
+                          />
                         </div>
-                        <div className="w-full bg-gray-100 rounded-full h-2">
-                          <div 
-                            className="bg-green-500 h-2 rounded-full transition-all duration-300"
-                            style={{ width: `${progress}%` }}
-                          ></div>
+                        <div className="flex flex-col gap-1.5">
+                          <label className="text-[10px] font-bold uppercase tracking-wider text-gray-400 font-mono">Brand Tone</label>
+                          <input
+                            type="text"
+                            value={brandTone}
+                            onChange={e => setBrandTone(e.target.value)}
+                            placeholder="e.g. Bold, technical, startup-energetic"
+                            className="bg-white border border-gray-200 rounded-lg px-4 py-2.5 text-xs text-slate-900 font-mono focus:outline-none focus:border-blue-500"
+                          />
                         </div>
                       </div>
-                    ))}
-                  </div>
-                </div>
 
-              </div>
+                      <div className="flex flex-col gap-1.5">
+                        <label className="text-[10px] font-bold uppercase tracking-wider text-gray-400 font-mono">Restricted Keywords</label>
+                        <input
+                          type="text"
+                          value={brandKeywords}
+                          onChange={e => setBrandKeywords(e.target.value)}
+                          placeholder="comma-separated list of restricted words"
+                          className="bg-white border border-gray-200 rounded-lg px-4 py-2.5 text-xs text-slate-900 font-mono focus:outline-none focus:border-blue-500"
+                        />
+                      </div>
 
-              {/* Style Guide Controls */}
-              <div className="bg-white border border-gray-200 rounded-xl p-5" style={{ padding: '20px' }}>
-                <span className="text-[10px] uppercase font-bold text-red-600 font-mono tracking-widest">Brand Voice Style Guide & Safety Rules</span>
-                
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-4">
-                  <div className="flex flex-col gap-2">
-                    <span className="text-[9px] uppercase font-bold text-gray-400 font-mono">Writing Restrictions</span>
-                    <ul className="list-disc list-inside text-xs font-mono text-gray-700 flex flex-col gap-1">
-                      {metadata.style_guide?.restrictions?.map((rule: string, idx: number) => (
-                        <li key={idx}>{rule}</li>
-                      ))}
-                    </ul>
-                  </div>
+                      <div className="flex flex-col gap-1.5">
+                        <label className="text-[10px] font-bold uppercase tracking-wider text-gray-400 font-mono">Raw Brand Voice Constraints</label>
+                        <textarea
+                          value={brandVoice}
+                          onChange={e => setBrandVoice(e.target.value)}
+                          placeholder="Free-form guidelines for writing..."
+                          rows={3}
+                          className="bg-white border border-gray-200 rounded-lg px-4 py-3 text-xs text-slate-900 font-mono focus:outline-none focus:border-blue-500 resize-y min-h-[96px]"
+                        />
+                      </div>
 
-                  <div className="flex flex-col gap-2">
-                    <span className="text-[9px] uppercase font-bold text-gray-400 font-mono">Restricted Keywords (Compliance Blocked)</span>
-                    <div className="flex flex-wrap gap-1.5 mt-1">
-                      {metadata.security_filters?.restricted_keywords?.map((word: string) => (
-                        <span 
-                          key={word} 
-                          className="bg-red-50 text-red-700 border border-red-100 text-[10px] font-mono rounded-md"
-                          style={{ padding: '3px 8px' }}
-                        >
-                          {word}
-                        </span>
-                      ))}
+                      <button
+                        onClick={saveBrandContext}
+                        disabled={savingBrand}
+                        className={`flex items-center justify-center gap-2 w-full py-3 font-bold text-xs rounded-xl transition-all duration-200 font-mono ${
+                          brandSaved
+                            ? 'bg-emerald-600 text-white'
+                            : savingBrand
+                            ? 'bg-gray-200 text-gray-400 cursor-not-allowed'
+                            : 'bg-blue-600 hover:bg-blue-700 text-white'
+                        }`}
+                      >
+                        {savingBrand ? (
+                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                        ) : brandSaved ? (
+                          <CheckCircle2 className="w-3.5 h-3.5" />
+                        ) : (
+                          <Save className="w-3.5 h-3.5" />
+                        )}
+                        {brandSaved ? 'Saved! Profile is active.' : savingBrand ? 'Saving Settings...' : 'Save Brand Profile'}
+                      </button>
                     </div>
                   </div>
-                </div>
-              </div>
+                )}
 
+                {workspaceTab === 'repos' && (
+                  <div className="max-w-3xl flex flex-col gap-6">
+                    {/* Repository List */}
+                    <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm flex flex-col gap-4">
+                      <h4 className="text-xs font-bold uppercase tracking-wider text-gray-700 font-mono">Connected Repositories</h4>
+                      {connectedRepos.length === 0 ? (
+                        <div className="text-center py-6 border border-dashed border-gray-200 rounded-xl bg-gray-50/50">
+                          <p className="text-xs text-gray-400 font-mono">No repositories connected yet.</p>
+                        </div>
+                      ) : (
+                        <div className="flex flex-col gap-3">
+                          {connectedRepos.map(repo => (
+                            <div key={repo.id} className="p-4 bg-gray-50 border border-gray-200 rounded-xl flex justify-between items-start gap-4">
+                              <div className="flex-1 min-w-0 font-mono">
+                                <div className="flex items-center gap-2">
+                                  <a href={repo.url} target="_blank" rel="noopener noreferrer" className="text-xs font-bold text-gray-900 hover:text-blue-600 transition-colors flex items-center gap-1">
+                                    {repo.name} <ExternalLink className="w-2.5 h-2.5 text-gray-400 shrink-0" />
+                                  </a>
+                                  {repo.is_primary && (
+                                    <span className="text-[8px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-100 rounded px-1.5 py-0.5">PRIMARY</span>
+                                  )}
+                                </div>
+                                {repo.description && <p className="text-[10px] text-gray-500 mt-1">{repo.description}</p>}
+                                <p className="text-[9px] text-gray-400 mt-1">Added {new Date(repo.added_at).toLocaleDateString()}</p>
+                              </div>
+                              <div className="flex gap-2">
+                                {!repo.is_primary && (
+                                  <button onClick={() => togglePrimaryRepo(repo.id)} className="text-[10px] bg-white border border-gray-200 hover:bg-gray-50 rounded px-2.5 py-1 text-gray-600 font-mono">
+                                    Make Primary
+                                  </button>
+                                )}
+                                <button onClick={() => removeRepo(repo.id)} disabled={removingRepoId === repo.id} className="p-1 rounded text-gray-400 hover:text-red-600 hover:bg-red-50 transition-colors">
+                                  {removingRepoId === repo.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
+                                </button>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+
+                      {/* Connect Repo Form */}
+                      <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl flex flex-col gap-3 mt-2">
+                        <h5 className="text-[10px] font-bold uppercase tracking-wider text-slate-600 font-mono">Connect Repository</h5>
+                        <div className="flex flex-col gap-2">
+                          <input
+                            type="text"
+                            value={newRepoUrl}
+                            onChange={e => setNewRepoUrl(e.target.value)}
+                            placeholder="Repository URL (e.g. https://github.com/owner/repo)"
+                            className="bg-white border border-slate-200 rounded-lg px-3 py-2 text-xs text-slate-900 font-mono focus:outline-none focus:border-blue-500"
+                          />
+                          <input
+                            type="text"
+                            value={newRepoDesc}
+                            onChange={e => setNewRepoDesc(e.target.value)}
+                            placeholder="Description (optional)"
+                            className="bg-white border border-slate-200 rounded-lg px-3 py-2 text-xs text-slate-900 font-mono focus:outline-none focus:border-blue-500"
+                          />
+                        </div>
+                        <button
+                          onClick={addRepo}
+                          disabled={addingRepo || !newRepoUrl.trim()}
+                          className="flex items-center justify-center gap-1.5 bg-blue-600 hover:bg-blue-700 disabled:bg-slate-200 disabled:text-slate-400 text-xs font-bold text-white py-2.5 rounded-lg transition-colors font-mono cursor-pointer"
+                        >
+                          {addingRepo ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Plus className="w-3.5 h-3.5" />}
+                          <span>Connect Repository</span>
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Webhook Guide */}
+                    <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm flex flex-col gap-4">
+                      <h4 className="text-xs font-bold uppercase tracking-wider text-gray-700 font-mono flex items-center gap-1">
+                        <Globe className="w-3.5 h-3.5 text-blue-600" />
+                        Live GitHub Webhook Integration
+                      </h4>
+                      <p className="text-[11px] text-gray-500 font-mono leading-relaxed">
+                        To enable automatic growth updates whenever code is pushed to your main branch, add a webhook in your repository settings:
+                      </p>
+                      <div className="flex flex-col gap-1">
+                        <label className="text-[9px] font-bold uppercase text-gray-400 font-mono">Payload URL</label>
+                        <div className="flex gap-2">
+                          <input
+                            type="text"
+                            readOnly
+                            value={typeof window !== 'undefined' ? `${window.location.origin}/api/webhook` : 'https://shipstory.vercel.app/api/webhook'}
+                            className="bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-xs font-mono text-gray-800 select-all flex-1 focus:outline-none"
+                          />
+                          <button
+                            onClick={() => {
+                              const url = typeof window !== 'undefined' ? `${window.location.origin}/api/webhook` : 'https://shipstory.vercel.app/api/webhook';
+                              handleCopy(url, 'Webhook URL', 'webhook');
+                            }}
+                            className={`p-2 border rounded-lg transition-colors flex items-center justify-center cursor-pointer ${
+                              copiedId === 'webhook'
+                                ? 'bg-emerald-600 border-emerald-600 text-white animate-pulse shadow-sm shadow-emerald-500/30'
+                                : 'border-gray-200 hover:bg-gray-50 text-gray-700'
+                            }`}
+                          >
+                            {copiedId === 'webhook' ? <span className="text-[10px] font-mono font-bold px-1">Copied!</span> : <Copy className="w-3.5 h-3.5" />}
+                          </button>
+                        </div>
+                      </div>
+                      <div className="bg-gray-50 p-4 border border-gray-200 rounded-xl text-[10px] text-gray-500 font-mono leading-relaxed space-y-1.5">
+                        <p className="font-bold text-gray-700">How to Setup webhook:</p>
+                        <ol className="list-decimal list-inside space-y-1">
+                          <li>Go to GitHub repository &rarr; Settings &rarr; Webhooks &rarr; Add webhook.</li>
+                          <li>Paste the Payload URL above.</li>
+                          <li>Content type: <strong className="text-gray-700 font-bold">application/json</strong></li>
+                          <li>Select: "Just the push event" &rarr; Add Webhook.</li>
+                        </ol>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {workspaceTab === 'documents' && (
+                  <div className="max-w-3xl flex flex-col gap-4">
+                    <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm flex flex-col gap-1.5">
+                      <h4 className="text-xs font-bold uppercase tracking-wider text-gray-700 font-mono">Onboarding Document Checklist</h4>
+                      <p className="text-[11px] text-gray-500 font-mono leading-relaxed">
+                        Structure your startup's core knowledge base. Our AI agents read these files to align content campaigns, style voice, and product roadmaps automatically.
+                      </p>
+                    </div>
+
+                    <div className="flex flex-col gap-3">
+                      {[
+                        { key: 'start_here', name: 'START_HERE.md', desc: 'Project onboarding guide and repository overview.' },
+                        { key: 'vision', name: 'Vision.md', desc: 'Product vision, core strategy, and goals.' },
+                        { key: 'prd', name: 'PRD.md', desc: 'Product Requirement Document detailing features.' },
+                        { key: 'business_model', name: 'BusinessModel.md', desc: 'Pricing plans, customer segment, and revenue.' },
+                        { key: 'roadmap', name: 'Roadmap.md', desc: 'Roadmap milestones and timelines.' },
+                        { key: 'architecture', name: 'Architecture.md', desc: 'Tech stack description, database models.' },
+                        { key: 'api_documentation', name: 'API_Documentation.md', desc: 'Detailed API endpoints reference.' },
+                        { key: 'gtm_strategy', name: 'GoToMarketStrategy.md', desc: 'Launch channels and target user acquisition.' },
+                        { key: 'brand_guidelines', name: 'BrandGuidelines.pdf', desc: 'Brand design, logos, and voice guidelines.' },
+                        { key: 'financial_model', name: 'FinancialModel.xlsx', desc: 'Revenue projections and break-even calculations.' },
+                        { key: 'sops', name: 'SOPs.md', desc: 'Standard Operating Procedures for engineering/ops.' },
+                        { key: 'decision_log', name: 'DecisionLog.md', desc: 'Chronological log of major product decisions.' }
+                      ].map((doc) => {
+                        const isExpanded = expandedDocKey === doc.key;
+                        const hasContent = !!documents[doc.key];
+                        const textVal = docDraftContent[doc.key] !== undefined ? docDraftContent[doc.key] : (documents[doc.key] || '');
+
+                        return (
+                          <div
+                            key={doc.key}
+                            className={`bg-white border rounded-xl overflow-hidden transition-all duration-200 shadow-sm ${
+                              isExpanded ? 'ring-2 ring-blue-500/50 border-blue-400' : 'border-gray-200 hover:border-gray-300'
+                            }`}
+                          >
+                            {/* Card Header */}
+                            <div
+                              onClick={() => {
+                                setExpandedDocKey(isExpanded ? null : doc.key);
+                                if (!isExpanded && docDraftContent[doc.key] === undefined) {
+                                  setDocDraftContent(prev => ({
+                                    ...prev,
+                                    [doc.key]: documents[doc.key] || ''
+                                  }));
+                                }
+                              }}
+                              className="flex items-center justify-between p-4 cursor-pointer select-none bg-white hover:bg-gray-50/50"
+                            >
+                              <div className="flex items-center gap-3">
+                                <div className={`w-5 h-5 rounded-full flex items-center justify-center border text-[10px] font-bold ${
+                                  hasContent
+                                    ? 'bg-green-100 text-green-700 border-green-200'
+                                    : 'bg-gray-50 text-gray-400 border-gray-200'
+                                }`}>
+                                  {hasContent ? '✓' : ''}
+                                </div>
+                                <div className="flex flex-col">
+                                  <span className="text-xs font-bold text-gray-900 font-mono">{doc.name}</span>
+                                  <span className="text-[10px] text-gray-400 font-mono mt-0.5">{doc.desc}</span>
+                                </div>
+                              </div>
+                              <ChevronDown className={`w-4 h-4 text-gray-400 transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
+                            </div>
+
+                            {/* Card Body */}
+                            {isExpanded && (
+                              <div className="p-4 bg-gray-50/40 border-t border-gray-100 flex flex-col gap-3">
+                                <textarea
+                                  value={textVal}
+                                  onChange={(e) => setDocDraftContent(prev => ({ ...prev, [doc.key]: e.target.value }))}
+                                  placeholder={`Paste the contents of ${doc.name} here...`}
+                                  rows={8}
+                                  className="w-full p-3 bg-white border border-gray-200 rounded-lg text-xs font-mono text-slate-800 focus:outline-none focus:border-blue-500 resize-y min-h-[140px]"
+                                />
+                                <div className="flex justify-between items-center gap-2 mt-1">
+                                  <button
+                                    onClick={() => handleAIPrefillDoc(doc.key)}
+                                    className="flex items-center gap-1.5 px-3 py-1.5 text-[10px] font-bold font-mono text-blue-600 hover:text-blue-700 bg-blue-50 hover:bg-blue-100 rounded-lg border border-blue-200/50 transition-colors"
+                                  >
+                                    <Sparkles className="w-3.5 h-3.5 animate-pulse" />
+                                    <span>AI Prefill Starter Template</span>
+                                  </button>
+                                  <button
+                                    onClick={() => handleSaveDocument(doc.key, textVal)}
+                                    disabled={savingDocs === doc.key}
+                                    className="flex items-center gap-1.5 px-4 py-1.5 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-300 text-white text-[10px] font-bold font-mono rounded-lg transition-colors cursor-pointer"
+                                  >
+                                    {savingDocs === doc.key ? (
+                                      <Loader2 className="w-3 h-3 animate-spin" />
+                                    ) : (
+                                      <Save className="w-3 h-3" />
+                                    )}
+                                    <span>{savingDocs === doc.key ? 'Saving...' : 'Save Document'}</span>
+                                  </button>
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
+                {workspaceTab === 'research' && (
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
+                    {/* Marshall Terminal Console */}
+                    <div className="lg:col-span-2 flex flex-col gap-3">
+                      <div className="bg-white p-5 rounded-xl border border-gray-200 shadow-sm">
+                        <span className="text-[10px] uppercase font-bold text-cyan-600 font-mono tracking-widest">Strategic Research Agent</span>
+                        <h3 className="text-sm font-bold text-gray-900 font-mono mt-1">Marshall Activity Terminal</h3>
+                        <p className="text-xs text-gray-500 mt-1">Real-time log of competitor scrapes, site structure fetches, and Tavily queries.</p>
+                      </div>
+
+                      {/* Green Terminal Console */}
+                      <div className="bg-[#0A0B0E] rounded-xl border border-[#1d1f27] overflow-hidden shadow-2xl">
+                        <div className="bg-[#12131A] px-4 py-2.5 border-b border-[#1d1f27] flex items-center justify-between select-none">
+                          <div className="flex items-center gap-1.5 font-mono">
+                            <Terminal className="w-3.5 h-3.5 text-cyan-400" />
+                            <span className="text-[9px] uppercase font-bold text-cyan-400 tracking-wider">marshall_research@shipstory: ~</span>
+                          </div>
+                          <div className="flex gap-1.5">
+                            <span className="w-2.5 h-2.5 rounded-full bg-red-500/30 border border-red-500/50"></span>
+                            <span className="w-2.5 h-2.5 rounded-full bg-yellow-500/30 border border-yellow-500/50"></span>
+                            <span className="w-2.5 h-2.5 rounded-full bg-green-500/30 border border-green-500/50"></span>
+                          </div>
+                        </div>
+                        <div className="p-5 font-mono text-[11px] text-cyan-300/90 leading-relaxed max-h-[360px] overflow-y-auto min-h-[240px] flex flex-col gap-1.5 select-text">
+                          {state.current_session?.agent_outputs?.marshall_recommendation?.logs?.length > 0 ? (
+                            state.current_session.agent_outputs.marshall_recommendation.logs.map((log: string, idx: number) => (
+                              <div key={idx} className="flex gap-2 items-start">
+                                <span className="text-cyan-600 shrink-0 select-none">&gt;</span>
+                                <span>{log}</span>
+                              </div>
+                            ))
+                          ) : (
+                            <div className="text-zinc-600 italic py-2">
+                              No execution logs found. Trigger a push simulation or campaign milestone to kickoff Marshall's strategic scraping scans.
+                            </div>
+                          )}
+                          <div className="flex gap-2 items-center text-cyan-500/60 select-none mt-1 animate-pulse">
+                            <span>&gt;</span>
+                            <span className="w-1.5 h-3 bg-cyan-400"></span>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Competitor Recommendations List */}
+                    <div className="bg-white p-5 lg:col-span-2 rounded-xl border border-gray-200 shadow-sm flex flex-col gap-4">
+                      <div>
+                        <span className="text-[10px] uppercase font-bold text-purple-600 font-mono tracking-widest">Active Intelligence Recommendations</span>
+                        <h4 className="text-sm font-bold text-gray-900 font-mono mt-1">Competitor Strategy Pivots</h4>
+                        <p className="text-[10px] text-gray-500 mt-1 leading-relaxed">Approve recommendations to mutatively write them to active roadmap milestones.</p>
+                      </div>
+
+                      <div className="flex flex-col gap-3.5 mt-2">
+                        {feedback.active_recommendations?.length > 0 ? (
+                          feedback.active_recommendations.map((rec: any, idx: number) => (
+                            <div key={idx} className="bg-gray-50 border border-gray-100 rounded-xl p-4 flex flex-col gap-3 font-mono">
+                              <div>
+                                <h5 className="text-xs font-bold text-gray-900 leading-snug">{rec.summary}</h5>
+                                <p className="text-[10px] text-gray-500 mt-1 leading-normal">{rec.rationale}</p>
+                              </div>
+                              <div className="flex justify-between items-center border-t border-gray-100/80 pt-3">
+                                <span className="text-[10px] font-bold text-purple-700 bg-purple-50 px-2 py-0.5 rounded">Impact: {rec.strategic_impact_score}/10</span>
+                                {rec.audit_status === 'APPROVED' ? (
+                                  <span className="text-[10px] font-bold text-green-600 flex items-center gap-0.5">
+                                    <Check className="w-3.5 h-3.5" /> Approved
+                                  </span>
+                                ) : (
+                                  <div className="flex gap-2">
+                                    <button
+                                      onClick={() => handleApproveRec(rec.recommendation_id)}
+                                      disabled={approvingRec === rec.recommendation_id || rejectingRec === rec.recommendation_id}
+                                      className="bg-purple-600 text-white font-bold text-[10px] rounded hover:bg-purple-700 disabled:opacity-50 px-3 py-1 cursor-pointer font-mono"
+                                    >
+                                      {approvingRec === rec.recommendation_id ? 'Approving...' : 'Approve Pivot'}
+                                    </button>
+                                    <button
+                                      onClick={() => handleRejectRec(rec.recommendation_id)}
+                                      disabled={approvingRec === rec.recommendation_id || rejectingRec === rec.recommendation_id}
+                                      className="bg-red-50 hover:bg-red-100 text-red-600 border border-red-200 font-bold text-[10px] rounded disabled:opacity-50 px-3 py-1 cursor-pointer font-mono"
+                                    >
+                                      {rejectingRec === rec.recommendation_id ? 'Rejecting...' : 'Reject'}
+                                    </button>
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          ))
+                        ) : (
+                          <div className="text-xs text-gray-400 font-mono italic py-4 text-center">No strategic competitor pivots generated yet.</div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
           )}
 
@@ -1972,21 +2652,131 @@ export default function Dashboard() {
                       <div className="flex justify-between items-center">
                         <span className="text-[10px] uppercase font-bold text-blue-500 font-mono">Twitter Announcement</span>
                         <div className="flex items-center gap-2">
+                          <div className="flex items-center gap-1 bg-gray-100 p-0.5 rounded-lg border border-gray-200">
+                            <button
+                              onClick={() => setDraftModes(prev => ({ ...prev, twitter: 'preview' }))}
+                              className={`px-2 py-0.5 text-[9px] font-bold font-mono rounded transition-all cursor-pointer ${
+                                draftModes.twitter === 'preview' ? 'bg-white text-gray-900 shadow-xs' : 'text-gray-500 hover:text-gray-800'
+                              }`}
+                            >
+                              Preview
+                            </button>
+                            <button
+                              onClick={() => setDraftModes(prev => ({ ...prev, twitter: 'edit' }))}
+                              className={`px-2 py-0.5 text-[9px] font-bold font-mono rounded transition-all cursor-pointer ${
+                                draftModes.twitter === 'edit' ? 'bg-white text-gray-900 shadow-xs' : 'text-gray-500 hover:text-gray-800'
+                              }`}
+                            >
+                              Edit
+                            </button>
+                          </div>
                           <button
-                            onClick={() => handleCopy(editedTwitter, 'Twitter Draft')}
-                            className="text-[10px] font-mono text-gray-500 hover:text-blue-600 bg-gray-100 hover:bg-blue-50 px-2 py-0.5 rounded transition-all cursor-pointer font-semibold"
+                            onClick={() => handleCopy(editedTwitter, 'Twitter Draft', 'twitter')}
+                            className={`text-[10px] font-mono px-2 py-0.5 rounded transition-all cursor-pointer font-semibold ${
+                              copiedId === 'twitter'
+                                ? 'bg-emerald-600 text-white animate-pulse shadow-sm shadow-emerald-500/30'
+                                : 'text-gray-500 hover:text-blue-600 bg-gray-100 hover:bg-blue-50'
+                            }`}
                           >
-                            Copy
+                            {copiedId === 'twitter' ? 'Copied!' : 'Copy'}
                           </button>
                           <span className="text-[9px] font-mono bg-blue-50 text-blue-600 rounded px-1.5 py-0.5 font-bold">STAGED</span>
                         </div>
                       </div>
-                      <textarea
-                        value={editedTwitter}
-                        onChange={(e) => setEditedTwitter(e.target.value)}
-                        disabled={isViewingHistory}
-                        className="w-full flex-1 min-h-[220px] p-3 text-xs font-medium text-gray-800 leading-relaxed font-mono bg-gray-50 border border-gray-100 focus:bg-white focus:border-blue-400 focus:ring-4 focus:ring-blue-100 rounded-lg outline-none resize-none transition-all disabled:opacity-75 disabled:cursor-not-allowed"
-                      />
+                      {draftModes.twitter === 'preview' ? (
+                        <div className="w-full flex-1 min-h-[220px] p-3.5 bg-gray-50/50 border border-gray-100 rounded-lg overflow-y-auto max-h-[300px] select-text">
+                          <div className="prose prose-sm prose-slate max-w-none text-xs leading-relaxed font-mono whitespace-pre-wrap">
+                            <ReactMarkdown
+                              remarkPlugins={[remarkGfm]}
+                              components={{
+                                h1: ({ children }) => <h1 className="text-sm font-bold mt-2 mb-1 text-gray-950 font-sans">{children}</h1>,
+                                h2: ({ children }) => <h2 className="text-xs font-bold mt-2 mb-1 text-gray-900 font-sans">{children}</h2>,
+                                p: ({ children }) => <p className="text-[11px] leading-relaxed text-gray-800 mt-1 mb-1 last:mb-0">{children}</p>,
+                                ul: ({ children }) => <ul className="list-disc list-outside space-y-0.5 mb-1.5 ml-4 pl-0 text-[11px] text-gray-800">{children}</ul>,
+                                ol: ({ children }) => <ol className="list-decimal list-outside space-y-0.5 mb-1.5 ml-4 pl-0 text-[11px] text-gray-800">{children}</ol>,
+                                li: ({ children }) => <li className="pl-0.5">{children}</li>,
+                                a: ({ href, children }) => <a href={href} target="_blank" rel="noopener noreferrer" className="text-blue-600 underline hover:text-blue-800 transition-colors">{children}</a>,
+                                strong: ({ children }) => <strong className="font-bold text-gray-950">{children}</strong>,
+                              }}
+                            >
+                              {editedTwitter || '*No content available*'}
+                            </ReactMarkdown>
+                          </div>
+                        </div>
+                      ) : (
+                        <textarea
+                          value={editedTwitter}
+                          onChange={(e) => setEditedTwitter(e.target.value)}
+                          disabled={isViewingHistory}
+                          className="w-full flex-1 min-h-[220px] p-3 text-xs font-medium text-gray-800 leading-relaxed font-mono bg-gray-50 border border-gray-100 focus:bg-white focus:border-blue-400 focus:ring-4 focus:ring-blue-100 rounded-lg outline-none resize-y transition-all disabled:opacity-75 disabled:cursor-not-allowed select-text"
+                        />
+                      )}
+                    </div>
+
+                    {/* LinkedIn Card */}
+                    <div className="bg-white border border-gray-200 rounded-xl p-5 flex flex-col gap-3" style={{ padding: '20px' }}>
+                      <div className="flex justify-between items-center">
+                        <span className="text-[10px] uppercase font-bold text-[#0A66C2] font-mono">LinkedIn Campaign Post</span>
+                        <div className="flex items-center gap-2">
+                          <div className="flex items-center gap-1 bg-gray-100 p-0.5 rounded-lg border border-gray-200">
+                            <button
+                              onClick={() => setDraftModes(prev => ({ ...prev, linkedin: 'preview' }))}
+                              className={`px-2 py-0.5 text-[9px] font-bold font-mono rounded transition-all cursor-pointer ${
+                                draftModes.linkedin === 'preview' ? 'bg-white text-gray-900 shadow-xs' : 'text-gray-500 hover:text-gray-800'
+                              }`}
+                            >
+                              Preview
+                            </button>
+                            <button
+                              onClick={() => setDraftModes(prev => ({ ...prev, linkedin: 'edit' }))}
+                              className={`px-2 py-0.5 text-[9px] font-bold font-mono rounded transition-all cursor-pointer ${
+                                draftModes.linkedin === 'edit' ? 'bg-white text-gray-900 shadow-xs' : 'text-gray-500 hover:text-gray-800'
+                              }`}
+                            >
+                              Edit
+                            </button>
+                          </div>
+                          <button
+                            onClick={() => handleCopy(editedLinkedIn, 'LinkedIn Draft', 'linkedin')}
+                            className={`text-[10px] font-mono px-2 py-0.5 rounded transition-all cursor-pointer font-semibold ${
+                              copiedId === 'linkedin'
+                                ? 'bg-emerald-600 text-white animate-pulse shadow-sm shadow-emerald-500/30'
+                                : 'text-gray-500 hover:text-[#0A66C2] bg-gray-100 hover:bg-blue-50'
+                            }`}
+                          >
+                            {copiedId === 'linkedin' ? 'Copied!' : 'Copy'}
+                          </button>
+                          <span className="text-[9px] font-mono bg-blue-50 text-[#0A66C2] rounded px-1.5 py-0.5 font-bold">STAGED</span>
+                        </div>
+                      </div>
+                      {draftModes.linkedin === 'preview' ? (
+                        <div className="w-full flex-1 min-h-[220px] p-3.5 bg-gray-50/50 border border-gray-100 rounded-lg overflow-y-auto max-h-[300px] select-text">
+                          <div className="prose prose-sm prose-slate max-w-none text-xs leading-relaxed font-mono whitespace-pre-wrap">
+                            <ReactMarkdown
+                              remarkPlugins={[remarkGfm]}
+                              components={{
+                                h1: ({ children }) => <h1 className="text-sm font-bold mt-2 mb-1 text-gray-950 font-sans">{children}</h1>,
+                                h2: ({ children }) => <h2 className="text-xs font-bold mt-2 mb-1 text-gray-900 font-sans">{children}</h2>,
+                                p: ({ children }) => <p className="text-[11px] leading-relaxed text-gray-800 mt-1 mb-1 last:mb-0">{children}</p>,
+                                ul: ({ children }) => <ul className="list-disc list-outside space-y-0.5 mb-1.5 ml-4 pl-0 text-[11px] text-gray-800">{children}</ul>,
+                                ol: ({ children }) => <ol className="list-decimal list-outside space-y-0.5 mb-1.5 ml-4 pl-0 text-[11px] text-gray-800">{children}</ol>,
+                                li: ({ children }) => <li className="pl-0.5">{children}</li>,
+                                a: ({ href, children }) => <a href={href} target="_blank" rel="noopener noreferrer" className="text-blue-600 underline hover:text-blue-800 transition-colors">{children}</a>,
+                                strong: ({ children }) => <strong className="font-bold text-gray-950">{children}</strong>,
+                              }}
+                            >
+                              {editedLinkedIn || '*No content available*'}
+                            </ReactMarkdown>
+                          </div>
+                        </div>
+                      ) : (
+                        <textarea
+                          value={editedLinkedIn}
+                          onChange={(e) => setEditedLinkedIn(e.target.value)}
+                          disabled={isViewingHistory}
+                          className="w-full flex-1 min-h-[220px] p-3 text-xs font-medium text-gray-800 leading-relaxed font-mono bg-gray-50 border border-gray-100 focus:bg-white focus:border-blue-400 focus:ring-4 focus:ring-blue-100 rounded-lg outline-none resize-y transition-all disabled:opacity-75 disabled:cursor-not-allowed select-text"
+                        />
+                      )}
                     </div>
 
                     {/* Changelog Card */}
@@ -1994,21 +2784,65 @@ export default function Dashboard() {
                       <div className="flex justify-between items-center">
                         <span className="text-[10px] uppercase font-bold text-green-600 font-mono">Changelog Entry</span>
                         <div className="flex items-center gap-2">
+                          <div className="flex items-center gap-1 bg-gray-100 p-0.5 rounded-lg border border-gray-200">
+                            <button
+                              onClick={() => setDraftModes(prev => ({ ...prev, changelog: 'preview' }))}
+                              className={`px-2 py-0.5 text-[9px] font-bold font-mono rounded transition-all cursor-pointer ${
+                                draftModes.changelog === 'preview' ? 'bg-white text-gray-900 shadow-xs' : 'text-gray-500 hover:text-gray-800'
+                              }`}
+                            >
+                              Preview
+                            </button>
+                            <button
+                              onClick={() => setDraftModes(prev => ({ ...prev, changelog: 'edit' }))}
+                              className={`px-2 py-0.5 text-[9px] font-bold font-mono rounded transition-all cursor-pointer ${
+                                draftModes.changelog === 'edit' ? 'bg-white text-gray-900 shadow-xs' : 'text-gray-500 hover:text-gray-800'
+                              }`}
+                            >
+                              Edit
+                            </button>
+                          </div>
                           <button
-                            onClick={() => handleCopy(editedChangelog, 'Changelog Entry')}
-                            className="text-[10px] font-mono text-gray-500 hover:text-green-600 bg-gray-100 hover:bg-green-50 px-2 py-0.5 rounded transition-all cursor-pointer font-semibold"
+                            onClick={() => handleCopy(editedChangelog, 'Changelog Entry', 'changelog')}
+                            className={`text-[10px] font-mono px-2 py-0.5 rounded transition-all cursor-pointer font-semibold ${
+                              copiedId === 'changelog'
+                                ? 'bg-emerald-600 text-white animate-pulse shadow-sm shadow-emerald-500/30'
+                                : 'text-gray-500 hover:text-green-600 bg-gray-100 hover:bg-green-50'
+                            }`}
                           >
-                            Copy
+                            {copiedId === 'changelog' ? 'Copied!' : 'Copy'}
                           </button>
                           <span className="text-[9px] font-mono bg-green-50 text-green-600 rounded px-1.5 py-0.5 font-bold">STAGED</span>
                         </div>
                       </div>
-                      <textarea
-                        value={editedChangelog}
-                        onChange={(e) => setEditedChangelog(e.target.value)}
-                        disabled={isViewingHistory}
-                        className="w-full flex-1 min-h-[220px] p-3 text-xs font-medium text-gray-800 leading-relaxed font-mono bg-gray-50 border border-gray-100 focus:bg-white focus:border-green-400 focus:ring-4 focus:ring-green-100 rounded-lg outline-none resize-none transition-all disabled:opacity-75 disabled:cursor-not-allowed"
-                      />
+                      {draftModes.changelog === 'preview' ? (
+                        <div className="w-full flex-1 min-h-[220px] p-3.5 bg-gray-50/50 border border-gray-100 rounded-lg overflow-y-auto max-h-[300px] select-text">
+                          <div className="prose prose-sm prose-slate max-w-none text-xs leading-relaxed font-mono whitespace-pre-wrap">
+                            <ReactMarkdown
+                              remarkPlugins={[remarkGfm]}
+                              components={{
+                                h1: ({ children }) => <h1 className="text-sm font-bold mt-2 mb-1 text-gray-950 font-sans">{children}</h1>,
+                                h2: ({ children }) => <h2 className="text-xs font-bold mt-2 mb-1 text-gray-900 font-sans">{children}</h2>,
+                                p: ({ children }) => <p className="text-[11px] leading-relaxed text-gray-800 mt-1 mb-1 last:mb-0">{children}</p>,
+                                ul: ({ children }) => <ul className="list-disc list-outside space-y-0.5 mb-1.5 ml-4 pl-0 text-[11px] text-gray-800">{children}</ul>,
+                                ol: ({ children }) => <ol className="list-decimal list-outside space-y-0.5 mb-1.5 ml-4 pl-0 text-[11px] text-gray-800">{children}</ol>,
+                                li: ({ children }) => <li className="pl-0.5">{children}</li>,
+                                a: ({ href, children }) => <a href={href} target="_blank" rel="noopener noreferrer" className="text-blue-600 underline hover:text-blue-800 transition-colors">{children}</a>,
+                                strong: ({ children }) => <strong className="font-bold text-gray-950">{children}</strong>,
+                              }}
+                            >
+                              {editedChangelog || '*No content available*'}
+                            </ReactMarkdown>
+                          </div>
+                        </div>
+                      ) : (
+                        <textarea
+                          value={editedChangelog}
+                          onChange={(e) => setEditedChangelog(e.target.value)}
+                          disabled={isViewingHistory}
+                          className="w-full flex-1 min-h-[220px] p-3 text-xs font-medium text-gray-800 leading-relaxed font-mono bg-gray-50 border border-gray-100 focus:bg-white focus:border-green-400 focus:ring-4 focus:ring-green-100 rounded-lg outline-none resize-y transition-all disabled:opacity-75 disabled:cursor-not-allowed select-text"
+                        />
+                      )}
                     </div>
 
                     {/* Newsletter Card */}
@@ -2016,21 +2850,65 @@ export default function Dashboard() {
                       <div className="flex justify-between items-center">
                         <span className="text-[10px] uppercase font-bold text-purple-600 font-mono">Newsletter Draft</span>
                         <div className="flex items-center gap-2">
+                          <div className="flex items-center gap-1 bg-gray-100 p-0.5 rounded-lg border border-gray-200">
+                            <button
+                              onClick={() => setDraftModes(prev => ({ ...prev, newsletter: 'preview' }))}
+                              className={`px-2 py-0.5 text-[9px] font-bold font-mono rounded transition-all cursor-pointer ${
+                                draftModes.newsletter === 'preview' ? 'bg-white text-gray-900 shadow-xs' : 'text-gray-500 hover:text-gray-800'
+                              }`}
+                            >
+                              Preview
+                            </button>
+                            <button
+                              onClick={() => setDraftModes(prev => ({ ...prev, newsletter: 'edit' }))}
+                              className={`px-2 py-0.5 text-[9px] font-bold font-mono rounded transition-all cursor-pointer ${
+                                draftModes.newsletter === 'edit' ? 'bg-white text-gray-900 shadow-xs' : 'text-gray-500 hover:text-gray-800'
+                              }`}
+                            >
+                              Edit
+                            </button>
+                          </div>
                           <button
-                            onClick={() => handleCopy(editedNewsletter, 'Newsletter Draft')}
-                            className="text-[10px] font-mono text-gray-500 hover:text-purple-600 bg-gray-100 hover:bg-purple-50 px-2 py-0.5 rounded transition-all cursor-pointer font-semibold"
+                            onClick={() => handleCopy(editedNewsletter, 'Newsletter Draft', 'newsletter')}
+                            className={`text-[10px] font-mono px-2 py-0.5 rounded transition-all cursor-pointer font-semibold ${
+                              copiedId === 'newsletter'
+                                ? 'bg-emerald-600 text-white animate-pulse shadow-sm shadow-emerald-500/30'
+                                : 'text-gray-500 hover:text-purple-600 bg-gray-100 hover:bg-purple-50'
+                            }`}
                           >
-                            Copy
+                            {copiedId === 'newsletter' ? 'Copied!' : 'Copy'}
                           </button>
                           <span className="text-[9px] font-mono bg-purple-50 text-purple-600 rounded px-1.5 py-0.5 font-bold">STAGED</span>
                         </div>
                       </div>
-                      <textarea
-                        value={editedNewsletter}
-                        onChange={(e) => setEditedNewsletter(e.target.value)}
-                        disabled={isViewingHistory}
-                        className="w-full flex-1 min-h-[220px] p-3 text-xs font-medium text-gray-800 leading-relaxed font-mono bg-gray-50 border border-gray-100 focus:bg-white focus:border-purple-400 focus:ring-4 focus:ring-purple-100 rounded-lg outline-none resize-none transition-all disabled:opacity-75 disabled:cursor-not-allowed"
-                      />
+                      {draftModes.newsletter === 'preview' ? (
+                        <div className="w-full flex-1 min-h-[220px] p-3.5 bg-gray-50/50 border border-gray-100 rounded-lg overflow-y-auto max-h-[300px] select-text">
+                          <div className="prose prose-sm prose-slate max-w-none text-xs leading-relaxed font-mono whitespace-pre-wrap">
+                            <ReactMarkdown
+                              remarkPlugins={[remarkGfm]}
+                              components={{
+                                h1: ({ children }) => <h1 className="text-sm font-bold mt-2 mb-1 text-gray-950 font-sans">{children}</h1>,
+                                h2: ({ children }) => <h2 className="text-xs font-bold mt-2 mb-1 text-gray-900 font-sans">{children}</h2>,
+                                p: ({ children }) => <p className="text-[11px] leading-relaxed text-gray-800 mt-1 mb-1 last:mb-0">{children}</p>,
+                                ul: ({ children }) => <ul className="list-disc list-outside space-y-0.5 mb-1.5 ml-4 pl-0 text-[11px] text-gray-800">{children}</ul>,
+                                ol: ({ children }) => <ol className="list-decimal list-outside space-y-0.5 mb-1.5 ml-4 pl-0 text-[11px] text-gray-800">{children}</ol>,
+                                li: ({ children }) => <li className="pl-0.5">{children}</li>,
+                                a: ({ href, children }) => <a href={href} target="_blank" rel="noopener noreferrer" className="text-blue-600 underline hover:text-blue-800 transition-colors">{children}</a>,
+                                strong: ({ children }) => <strong className="font-bold text-gray-950">{children}</strong>,
+                              }}
+                            >
+                              {editedNewsletter || '*No content available*'}
+                            </ReactMarkdown>
+                          </div>
+                        </div>
+                      ) : (
+                        <textarea
+                          value={editedNewsletter}
+                          onChange={(e) => setEditedNewsletter(e.target.value)}
+                          disabled={isViewingHistory}
+                          className="w-full flex-1 min-h-[220px] p-3 text-xs font-medium text-gray-800 leading-relaxed font-mono bg-gray-50 border border-gray-100 focus:bg-white focus:border-purple-400 focus:ring-4 focus:ring-purple-100 rounded-lg outline-none resize-y transition-all disabled:opacity-75 disabled:cursor-not-allowed select-text"
+                        />
+                      )}
                     </div>
 
                   </div>
@@ -2081,11 +2959,11 @@ export default function Dashboard() {
                               ? "Vinci prompt generated! Simulating image rendering. Approved campaign graphics will automatically synchronize here."
                               : "Vinci has not generated a prompt yet. Generate and approve Gigi's copy drafts to trigger Vinci's creative design cycle."}
                           </p>
-                          <div className="flex items-center gap-6 mt-4 opacity-40">
-                            <div className="w-8 h-8 rounded-full border border-dashed border-indigo-400 flex items-center justify-center text-[10px] font-mono text-indigo-400">Node A</div>
-                            <div className="w-16 border-t-2 border-dashed border-indigo-400 animate-pulse"></div>
-                            <div className="w-8 h-8 rounded-full border border-dashed border-indigo-400 flex items-center justify-center text-[10px] font-mono text-indigo-400">Node B</div>
-                          </div>
+                            {/* <div className="flex items-center gap-6 mt-4 opacity-40">
+                              <div className="w-8 h-8 rounded-full border border-dashed border-indigo-400 flex items-center justify-center text-[10px] font-mono text-indigo-400">Node A</div>
+                              <div className="w-16 border-t-2 border-dashed border-indigo-400 animate-pulse"></div>
+                              <div className="w-8 h-8 rounded-full border border-dashed border-indigo-400 flex items-center justify-center text-[10px] font-mono text-indigo-400">Node B</div>
+                            </div> */}
                         </div>
                       )}
                     </div>
@@ -2120,14 +2998,24 @@ export default function Dashboard() {
                                 <Check className="w-3.5 h-3.5" /> Approved
                               </span>
                             ) : (
-                              <button
-                                onClick={() => handleApproveRec(rec.recommendation_id)}
-                                disabled={approvingRec === rec.recommendation_id}
-                                className="bg-purple-600 text-white font-bold text-[10px] rounded hover:bg-purple-700 disabled:opacity-50"
-                                style={{ padding: '5px 10px' }}
-                              >
-                                {approvingRec === rec.recommendation_id ? 'Mutating...' : 'Approve Pivot'}
-                              </button>
+                              <div className="flex gap-2">
+                                <button
+                                  onClick={() => handleApproveRec(rec.recommendation_id)}
+                                  disabled={approvingRec === rec.recommendation_id || rejectingRec === rec.recommendation_id}
+                                  className="bg-purple-600 text-white font-bold text-[10px] rounded hover:bg-purple-700 disabled:opacity-50"
+                                  style={{ padding: '5px 10px' }}
+                                >
+                                  {approvingRec === rec.recommendation_id ? 'Mutating...' : 'Approve Pivot'}
+                                </button>
+                                <button
+                                  onClick={() => handleRejectRec(rec.recommendation_id)}
+                                  disabled={approvingRec === rec.recommendation_id || rejectingRec === rec.recommendation_id}
+                                  className="bg-red-50 hover:bg-red-100 text-red-600 border border-red-200 font-bold text-[10px] rounded disabled:opacity-50"
+                                  style={{ padding: '5px 10px' }}
+                                >
+                                  {rejectingRec === rec.recommendation_id ? 'Rejecting...' : 'Reject'}
+                                </button>
+                              </div>
                             )}
                           </div>
                         </div>
@@ -2188,14 +3076,14 @@ export default function Dashboard() {
                 <div className="flex gap-1 bg-gray-50 p-1 rounded-lg">
                   <button
                     onClick={() => setRightSidebarTab('chat')}
-                    className={`flex items-center gap-1.5 px-2.5 py-1 rounded-sm text-[11px] font-bold font-mono transition-all duration-150 cursor-pointer ${
+                    className={`flex items-center gap-1.5 px-2.5 py-1 border rounded-sm text-[11px] font-bold font-mono transition-all duration-150 cursor-pointer ${
                       rightSidebarTab === 'chat'
-                        ? 'bg-white text-purple-700 shadow-sm'
+                        ? 'bg-white text-purple-700 shadow-xs'
                         : 'text-gray-500 hover:text-gray-800'
                     }`}
                   >
-                    <MessageSquare className="w-3 h-3" />
-                    <span>Chat</span>
+                    <HatGlasses className="w-3 h-3 mb-0.5" />
+                    <span>Connie</span>
                     <span 
                       className={`w-1.5 h-1.5 rounded-full ${state?.room_id ? 'bg-emerald-500' : 'bg-amber-500'}`} 
                       title={state?.room_id ? "Connie Status: Connected to Band room" : "Connie Status: Cold starting (Band room ID not resolved)"}
@@ -2203,9 +3091,9 @@ export default function Dashboard() {
                   </button>
                   <button
                     onClick={() => setRightSidebarTab('inspector')}
-                    className={`flex items-center gap-1.5 px-2.5 py-1 rounded-sm text-[11px] font-bold font-mono transition-all duration-150 cursor-pointer ${
+                    className={`flex items-center gap-1.5 px-2.5 py-1 border rounded-sm text-[11px] font-bold font-mono transition-all duration-150 cursor-pointer ${
                       rightSidebarTab === 'inspector'
-                        ? 'bg-white text-blue-700 shadow-sm'
+                        ? 'bg-white text-blue-700 shadow-xs'
                         : 'text-gray-500 hover:text-gray-800'
                     }`}
                   >
@@ -2244,7 +3132,7 @@ export default function Dashboard() {
                               isUser ? 'self-end items-end' : 'self-start items-start'
                             }`}
                           >
-                            <span className="text-[9px] font-bold font-mono text-gray-400 px-1">{isUser ? 'You' : 'Connie'}</span>
+                            <span className="text-[9px] font-bold font-mono text-gray-400 px-1">{isUser ? 'You' : h.sender === 'marshall' ? 'Marshall' : 'Connie'}</span>
                             <div 
                               className={`rounded-xl text-xs leading-relaxed font-mono px-3 py-2 ${
                                 isUser 
@@ -2421,6 +3309,27 @@ export default function Dashboard() {
                         )}
                       </div>
 
+                      {/* Marshall sources list */}
+                      {selectedNode.id === 'marshall' && outputs.marshall_recommendation?.sources?.length > 0 && (
+                        <div className="bg-cyan-50/50 border border-cyan-100 rounded-xl p-4 shadow-sm flex flex-col gap-2.5 mt-3">
+                          <span className="text-[9px] uppercase font-bold text-cyan-600 font-mono tracking-wider">Research Sources & References</span>
+                          <div className="flex flex-col gap-2 font-mono text-[10px] text-gray-700">
+                            {outputs.marshall_recommendation.sources.map((src: string, idx: number) => (
+                              <a 
+                                key={idx} 
+                                href={src} 
+                                target="_blank" 
+                                rel="noopener noreferrer" 
+                                className="text-blue-600 hover:text-blue-800 hover:underline break-all flex items-center gap-1.5"
+                              >
+                                <span>🔗</span>
+                                <span>{src}</span>
+                              </a>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
                       {/* Actions */}
                       {selectedNode.data.actions && selectedNode.data.actions.length > 0 && (
                         <div className="flex flex-col gap-2 mt-2 bg-white border border-gray-200 rounded-xl p-3 shadow-sm">
@@ -2493,16 +3402,6 @@ export default function Dashboard() {
             {/* Mode tabs */}
             <div className="flex gap-0 border-b border-slate-200 shrink-0 bg-white">
               <button
-                onClick={() => setModalTab('workspace')}
-                className={`flex items-center gap-1.5 px-5 py-3 text-xs font-bold font-mono border-b-2 transition-colors ${
-                  modalTab === 'workspace' ? 'border-blue-600 text-blue-700' : 'border-transparent text-slate-500 hover:text-slate-800'
-                }`}
-              >
-                <Building2 className="w-3.5 h-3.5" />
-                Workspace Settings
-                {brandName && <span className="ml-1.5 text-[9px] bg-blue-50 text-blue-700 border border-blue-100 rounded px-1.5 py-0.5 font-mono">{brandName.slice(0, 12)}{brandName.length > 12 ? '…' : ''}</span>}
-              </button>
-              <button
                 onClick={() => setModalTab('explore')}
                 className={`flex items-center gap-1.5 px-5 py-3 text-xs font-bold font-mono border-b-2 transition-colors ${
                   modalTab === 'explore' ? 'border-blue-600 text-blue-700' : 'border-transparent text-slate-500 hover:text-slate-800'
@@ -2519,6 +3418,15 @@ export default function Dashboard() {
               >
                 <Edit3 className="w-3.5 h-3.5" />
                 Custom Commit
+              </button>
+              <button
+                onClick={() => setModalTab('campaign')}
+                className={`flex items-center gap-1.5 px-5 py-3 text-xs font-bold font-mono border-b-2 transition-colors ${
+                  modalTab === 'campaign' ? 'border-blue-600 text-blue-700' : 'border-transparent text-slate-500 hover:text-slate-800'
+                }`}
+              >
+                <Sparkles className="w-3.5 h-3.5 text-blue-600" />
+                Campaign Idea
               </button>
             </div>
 
@@ -2592,7 +3500,10 @@ export default function Dashboard() {
                         </span>
                       </div>
                       <button
-                        onClick={() => setModalTab('workspace')}
+                        onClick={() => {
+                          setShowGitHubModal(false);
+                          setWorkspaceTab('brand');
+                        }}
                         className="text-[10px] font-bold font-mono text-blue-600 hover:text-blue-700 transition-colors ml-2 shrink-0"
                       >
                         Edit →
@@ -2657,286 +3568,6 @@ export default function Dashboard() {
                 </>
               )}
 
-              {/* --- WORKSPACE SETTINGS TAB --- */}
-              {modalTab === 'workspace' && (
-                <div className="flex flex-col gap-6">
-
-                  {/* Onboarding welcome info */}
-                  {(!brandName && connectedRepos.length === 0) && (
-                    <div className="p-4 bg-blue-50 border border-blue-100 rounded-xl">
-                      <h4 className="text-xs font-bold text-blue-950 font-mono flex items-center gap-1.5">
-                        <Sparkles className="w-3.5 h-3.5 text-blue-600 animate-pulse" /> Set Up Your Project Workspace
-                      </h4>
-                      <p className="text-[10px] text-blue-700 font-mono mt-1.5 leading-relaxed">
-                        Welcome to ShipStory! Create your workspace by defining your company profile and connecting your codebases. All AI agents will read this context to analyze changes and generate social media drafts.
-                      </p>
-                    </div>
-                  )}
-
-                  {/* Explainer banner */}
-                  <div className="flex items-start gap-3 p-4 bg-blue-50 border border-blue-100 rounded-xl">
-                    <Sparkles className="w-4 h-4 text-blue-600 shrink-0 mt-0.5" />
-                    <div>
-                      <p className="text-xs font-semibold text-slate-900 font-mono">Workspace Context guides all agents</p>
-                      <p className="text-[10px] text-slate-600 font-mono mt-0.5 leading-relaxed">
-                        All 6 agents consult your workspace settings before every run. Change company details or repos, and ShipStory adapts instantly.
-                      </p>
-                    </div>
-                  </div>
-
-                  {/* Company Name */}
-                  <div className="flex flex-col gap-1.5">
-                    <label className="text-[10px] font-bold uppercase tracking-wider text-gray-400 font-mono">Company / Startup Name</label>
-                    <input
-                      type="text"
-                      value={brandName}
-                      onChange={e => setBrandName(e.target.value)}
-                      placeholder="e.g. Nexus Labs"
-                      className="bg-white border border-slate-200 rounded-lg px-4 py-2.5 text-sm text-slate-900 font-mono placeholder-slate-400 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 transition-colors"
-                    />
-                  </div>
-
-                  {/* Value Proposition */}
-                  <div className="flex flex-col gap-1.5">
-                    <label className="text-[10px] font-bold uppercase tracking-wider text-gray-400 font-mono">Value Proposition</label>
-                    <textarea
-                      value={brandValueProp}
-                      onChange={e => setBrandValueProp(e.target.value)}
-                      placeholder="What problem do you solve? Who for? What makes you different?"
-                      rows={2}
-                      className="bg-white border border-slate-200 rounded-lg px-4 py-3 text-sm text-slate-900 font-mono placeholder-slate-400 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 resize-y min-h-[88px] transition-colors"
-                    />
-                  </div>
-
-                  {/* Target Persona + Tone row */}
-                  <div className="grid grid-cols-2 gap-3">
-                    <div className="flex flex-col gap-1.5">
-                      <label className="text-[10px] font-bold uppercase tracking-wider text-gray-400 font-mono">Target Persona</label>
-                      <input
-                        type="text"
-                        value={brandPersona}
-                        onChange={e => setBrandPersona(e.target.value)}
-                        placeholder="e.g. Solo devs, lean startups"
-                        className="bg-white border border-slate-200 rounded-lg px-4 py-2.5 text-sm text-slate-900 font-mono placeholder-slate-400 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 transition-colors"
-                      />
-                    </div>
-                    <div className="flex flex-col gap-1.5">
-                      <label className="text-[10px] font-bold uppercase tracking-wider text-gray-400 font-mono">Brand Tone</label>
-                      <input
-                        type="text"
-                        value={brandTone}
-                        onChange={e => setBrandTone(e.target.value)}
-                        placeholder="e.g. Bold, technical, startup-energetic"
-                        className="bg-white border border-slate-200 rounded-lg px-4 py-2.5 text-sm text-slate-900 font-mono placeholder-slate-400 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 transition-colors"
-                      />
-                    </div>
-                  </div>
-
-                  {/* Restricted Keywords */}
-                  <div className="flex flex-col gap-1.5">
-                    <label className="text-[10px] font-bold uppercase tracking-wider text-gray-400 font-mono">
-                      Restricted Keywords <span className="text-gray-600 normal-case">(comma-separated — Priscilla will flag these)</span>
-                    </label>
-                    <input
-                      type="text"
-                      value={brandKeywords}
-                      onChange={e => setBrandKeywords(e.target.value)}
-                      placeholder="pivot, exit strategy, acquisition target, bankruptcy"
-                      className="bg-white border border-slate-200 rounded-lg px-4 py-2.5 text-sm text-slate-900 font-mono placeholder-slate-400 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 transition-colors"
-                    />
-                    {brandKeywords && (
-                      <div className="flex flex-wrap gap-1.5 mt-1">
-                        {brandKeywords.split(',').map(k => k.trim()).filter(Boolean).map((kw, i) => (
-                          <span key={i} className="text-[10px] font-mono bg-blue-50 text-blue-700 border border-blue-100 rounded px-2 py-0.5">
-                            {kw}
-                          </span>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Brand Voice */}
-                  <div className="flex flex-col gap-1.5">
-                    <label className="text-[10px] font-bold uppercase tracking-wider text-gray-400 font-mono">Raw Brand Voice &amp; Constraints</label>
-                    <textarea
-                      value={brandVoice}
-                      onChange={e => setBrandVoice(e.target.value)}
-                      placeholder="Free-form notes: writing style, content length, things to avoid, specific phrases..."
-                      rows={3}
-                      className="bg-white border border-slate-200 rounded-lg px-4 py-3 text-sm text-slate-900 font-mono placeholder-slate-400 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 resize-y min-h-[112px] transition-colors"
-                    />
-                  </div>
-
-                  {/* Save Brand Context Button */}
-                  <button
-                    onClick={saveBrandContext}
-                    disabled={savingBrand}
-                    className={`flex items-center justify-center gap-2 w-full py-3.5 font-bold text-sm rounded-xl transition-all duration-200 ${
-                      brandSaved
-                        ? 'bg-emerald-600 text-white'
-                        : savingBrand
-                        ? 'bg-gray-200 text-gray-400 cursor-not-allowed'
-                        : 'bg-blue-600 hover:bg-blue-700 text-white'
-                    }`}
-                  >
-                    {savingBrand ? (
-                      <Loader2 className="w-4 h-4 animate-spin" />
-                    ) : brandSaved ? (
-                      <CheckCircle2 className="w-4 h-4" />
-                    ) : (
-                      <Save className="w-4 h-4" />
-                    )}
-                    {brandSaved ? 'Saved! Agents will use this context.' : savingBrand ? 'Saving Settings...' : 'Save Workspace Profile'}
-                  </button>
-
-                  <div className="border-t border-slate-200 my-2" />
-
-                  {/* Connected Repositories Management */}
-                  <div className="flex flex-col gap-3">
-                    <h4 className="text-xs font-bold uppercase tracking-wider text-slate-500 font-mono flex items-center gap-1.5">
-                      <GitBranch className="w-3.5 h-3.5 text-blue-600" /> Connected Codebases
-                    </h4>
-                    
-                    {connectedRepos.length === 0 ? (
-                      <div className="text-center py-6 border border-dashed border-slate-200 rounded-xl bg-slate-50/50">
-                        <p className="text-xs text-slate-500 font-mono">No repositories connected yet.</p>
-                      </div>
-                    ) : (
-                      <div className="flex flex-col gap-2">
-                        {connectedRepos.map((repo) => (
-                          <div
-                            key={repo.id}
-                            className="p-3.5 bg-white border border-slate-200 rounded-xl flex items-start justify-between gap-3 shadow-sm hover:border-slate-300 transition-colors"
-                          >
-                            <div className="flex-1 min-w-0">
-                              <div className="flex items-center gap-2">
-                                <a
-                                  href={repo.url}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className="text-xs font-bold text-slate-900 font-mono hover:text-blue-600 transition-colors flex items-center gap-1"
-                                >
-                                  {repo.name} <ExternalLink className="w-2.5 h-2.5 text-slate-400 shrink-0" />
-                                </a>
-                                {repo.is_primary ? (
-                                  <span className="inline-flex items-center gap-0.5 text-[8px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-100 rounded px-1.5 py-0.5 font-mono">
-                                    <Star className="w-2 h-2 fill-current text-emerald-600" /> Primary
-                                  </span>
-                                ) : (
-                                  <button
-                                    onClick={() => togglePrimaryRepo(repo.id)}
-                                    className="text-[9px] text-slate-500 hover:text-blue-600 font-mono font-semibold"
-                                  >
-                                    Make Primary
-                                  </button>
-                                )}
-                              </div>
-                              {repo.description && (
-                                <p className="text-[10px] text-slate-500 font-mono mt-0.5">{repo.description}</p>
-                              )}
-                              <p className="text-[9px] text-slate-400 font-mono mt-1">
-                                Added on {new Date(repo.added_at).toLocaleDateString()}
-                              </p>
-                            </div>
-                            <button
-                              onClick={() => removeRepo(repo.id)}
-                              disabled={removingRepoId === repo.id}
-                              className="p-1 rounded text-slate-400 hover:text-red-600 hover:bg-red-50 transition-colors shrink-0"
-                            >
-                              {removingRepoId === repo.id ? (
-                                <Loader2 className="w-3.5 h-3.5 animate-spin text-red-500" />
-                              ) : (
-                                <Trash2 className="w-3.5 h-3.5" />
-                              )}
-                            </button>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-
-                    {/* Inline Add Repo Form */}
-                    <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl flex flex-col gap-3 mt-1">
-                      <h5 className="text-[10px] font-bold uppercase tracking-wider text-slate-600 font-mono">Connect Repository</h5>
-                      <div className="flex flex-col gap-2">
-                        <input
-                          type="text"
-                          value={newRepoUrl}
-                          onChange={e => setNewRepoUrl(e.target.value)}
-                          placeholder="Repository URL (e.g., https://github.com/owner/repo)"
-                          className="bg-white border border-slate-200 rounded-lg px-3 py-2 text-xs text-slate-900 font-mono placeholder-slate-400 focus:outline-none focus:border-blue-500 transition-colors"
-                        />
-                        <input
-                          type="text"
-                          value={newRepoDesc}
-                          onChange={e => setNewRepoDesc(e.target.value)}
-                          placeholder="Description (e.g., Frontend dashboard app — optional)"
-                          className="bg-white border border-slate-200 rounded-lg px-3 py-2 text-xs text-slate-900 font-mono placeholder-slate-400 focus:outline-none focus:border-blue-500 transition-colors"
-                        />
-                      </div>
-                      <button
-                        onClick={addRepo}
-                        disabled={addingRepo || !newRepoUrl.trim()}
-                        className="flex items-center justify-center gap-1.5 bg-blue-600 hover:bg-blue-700 disabled:bg-slate-200 disabled:text-slate-400 disabled:cursor-not-allowed text-xs font-bold text-white py-2 rounded-lg transition-colors font-mono"
-                      >
-                        {addingRepo ? (
-                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                        ) : (
-                          <Plus className="w-3.5 h-3.5" />
-                        )}
-                        Connect Repository
-                      </button>
-                    </div>
-                  </div>
-
-                  <div className="border-t border-slate-200 my-2" />
-
-                  {/* GitHub Webhook Integration Guide */}
-                  <div className="flex flex-col gap-3 p-4 bg-slate-50 border border-slate-200 rounded-xl">
-                    <h4 className="text-xs font-bold uppercase tracking-wider text-slate-600 font-mono flex items-center gap-1.5">
-                      <Globe className="w-3.5 h-3.5 text-blue-600 animate-pulse" /> Live Webhook Listeners
-                    </h4>
-                    <p className="text-[11px] text-slate-500 font-mono leading-relaxed">
-                      Enable real-time change monitoring! Automatically triggers Connie, Devin, Gigi, and Priscilla to synthesize release updates whenever code is pushed to your connected repositories.
-                    </p>
-                    
-                    <div className="flex flex-col gap-1.5 mt-1">
-                      <label className="text-[9px] font-bold uppercase tracking-wider text-slate-400 font-mono">Payload URL</label>
-                      <div className="flex items-center gap-2">
-                        <input
-                          type="text"
-                          readOnly
-                          value={typeof window !== 'undefined' ? `${window.location.origin}/api/webhook` : 'https://shipstory.vercel.app/api/webhook'}
-                          className="bg-white border border-slate-200 rounded-lg px-3 py-2 text-xs text-slate-800 font-mono select-all flex-1 focus:outline-none"
-                        />
-                        <button
-                          onClick={() => {
-                            const url = typeof window !== 'undefined' ? `${window.location.origin}/api/webhook` : 'https://shipstory.vercel.app/api/webhook';
-                            handleCopy(url, 'Webhook URL');
-                          }}
-                          className="p-2 bg-white hover:bg-slate-50 border border-slate-200 rounded-lg text-slate-600 hover:text-slate-950 transition-colors flex items-center justify-center shrink-0 cursor-pointer"
-                          title="Copy Webhook URL"
-                        >
-                          <Copy className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
-                    </div>
-
-                    <div className="mt-2 bg-white border border-slate-200/60 rounded-lg p-3 flex flex-col gap-2">
-                      <span className="text-[10px] font-bold text-slate-700 font-mono">Setup Steps:</span>
-                      <ol className="list-decimal list-inside text-[10px] text-slate-500 font-mono leading-relaxed space-y-1">
-                        <li>In your GitHub Repository, go to <strong className="text-slate-700">Settings</strong> &rarr; <strong className="text-slate-700">Webhooks</strong> &rarr; <strong className="text-slate-700">Add webhook</strong>.</li>
-                        <li>Paste the <strong className="text-blue-600">Payload URL</strong> copied above.</li>
-                        <li>Select Content type: <strong className="text-slate-700 font-mono">application/json</strong>.</li>
-                        <li>Keep Secret empty, and SSL verification enabled.</li>
-                        <li>Under event triggers, choose <strong className="text-slate-700">Just the push event.</strong></li>
-                        <li>Click <strong className="text-slate-700">Add webhook</strong>. Any push to your primary branch will now automatically run the agents pipeline!</li>
-                      </ol>
-                    </div>
-                  </div>
-
-                </div>
-              )}
-
               {/* --- CUSTOM COMMIT MODE --- */}
               {modalTab === 'custom' && (
                 <div className="flex flex-col gap-4">
@@ -2978,12 +3609,43 @@ export default function Dashboard() {
                 </div>
               )}
 
+              {/* --- CAMPAIGN IDEA TAB --- */}
+              {modalTab === 'campaign' && (
+                <div className="flex flex-col gap-4">
+                  <div className="flex flex-col gap-2">
+                    <label className="text-[10px] font-bold uppercase tracking-wider text-gray-400 font-mono">Campaign Topic / Question</label>
+                    <textarea
+                      value={customCampaignPrompt}
+                      onChange={(e) => setCustomCampaignPrompt(e.target.value)}
+                      placeholder={"e.g. What are our target audience attracted to right now?\n\nOr: Local-first vs Cloud-native: draft an angle highlighting our <10ms sync performance."}
+                      rows={5}
+                      className="bg-white border border-slate-200 rounded-lg px-4 py-3 text-sm text-slate-900 font-mono placeholder-slate-400 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 resize-y min-h-[140px] transition-colors"
+                    />
+                  </div>
+                  {/* Brand context reminder */}
+                  {brandName && (
+                    <div className="flex items-center gap-2 px-3 py-2 bg-blue-50 border border-blue-100 rounded-lg">
+                      <Building2 className="w-3.5 h-3.5 text-blue-600 shrink-0" />
+                      <span className="text-[10px] font-mono text-slate-700">Will be analyzed under <strong className="text-blue-700">{brandName}</strong></span>
+                    </div>
+                  )}
+                  <button
+                    onClick={triggerWithCampaignConcept}
+                    disabled={!customCampaignPrompt.trim()}
+                    className="flex items-center justify-center gap-2 w-full py-3 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-200 disabled:text-gray-500 disabled:cursor-not-allowed text-white font-bold text-sm rounded-xl transition-colors"
+                  >
+                    <Sparkles className="w-4 h-4 fill-current text-indigo-200" />
+                    Launch Dynamic Campaign Pipeline
+                  </button>
+                </div>
+              )}
+
             </div>
 
             {/* Modal Footer */}
             <div className="flex items-center justify-between px-6 py-3 border-t border-slate-200 bg-slate-50 shrink-0">
               <p className="text-[10px] text-slate-500 font-mono">
-                {modalTab === 'workspace' ? 'Workspace profile is loaded by all agents before each analysis' : 'Commit data is parsed by Devin to extract technical changes'}
+                {modalTab === 'custom' ? 'Directly enter custom commit details for analysis' : 'Commit data is parsed by Devin to extract technical changes'}
               </p>
               <button
                 onClick={() => setShowGitHubModal(false)}
