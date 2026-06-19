@@ -683,8 +683,9 @@ export default function Dashboard() {
   const [customCampaignPrompt, setCustomCampaignPrompt] = useState('');
 
   // ── Multi-Tenant Startup State ──────────────────────────────────────────────
-  const [companyId, setCompanyId] = useState('nexus_labs');
+  const [companyId, setCompanyId] = useState('qleva');
   const [startupList, setStartupList] = useState<Array<{ id: string; name: string }>>([
+    { id: 'qleva', name: 'Qleva' },
     { id: 'nexus_labs', name: 'Nexus Labs' },
     { id: 'orbit_sync', name: 'Orbit Sync' },
     { id: 'saas_flow', name: 'SaaS Flow' },
