@@ -714,6 +714,7 @@ export default function Dashboard() {
   const [brandVoice, setBrandVoice] = useState('');
   const [savingBrand, setSavingBrand] = useState(false);
   const [brandSaved, setBrandSaved] = useState(false);
+  const [isEditingBrand, setIsEditingBrand] = useState(false);
 
   // ── Connected Repositories state & actions ──────────────────────────────────
   const [connectedRepos, setConnectedRepos] = useState<any[]>([]);
@@ -1088,6 +1089,7 @@ export default function Dashboard() {
         await fetchState(); // refresh header name instantly
         setTimeout(() => setBrandSaved(false), 3000);
         showToast(`\u2713 Brand context saved for "${brandName.trim() || 'startup'}"`);
+        setIsEditingBrand(false);
       } else {
         showToast('Failed to save brand context', 'error');
       }
@@ -1291,6 +1293,7 @@ export default function Dashboard() {
 
         showToast('✓ AI successfully extracted and saved brand profile!');
         await fetchState();
+        setIsEditingBrand(false);
       } else {
         showToast(data.error || 'Failed to extract startup context', 'error');
       }
@@ -1884,20 +1887,7 @@ export default function Dashboard() {
             </div>
           )}
 
-          {/* Hide/Show Assistant button (Desktop only) */}
-          <button
-            onClick={() => setIsRightSidebarOpen(!isRightSidebarOpen)}
-            className={`hidden md:flex items-center gap-1.5 h-9 border rounded-lg text-xs font-semibold transition-all duration-200 cursor-pointer ${
-              isRightSidebarOpen 
-                ? 'bg-[#F3E8FF] text-[#7C3AED] border-[#E9D5FF] hover:bg-[#E9D5FF]' 
-                : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50'
-            }`}
-            style={{ padding: '8px 12px' }}
-          >
-            <MessageSquare className="w-3.5 h-3.5" />
-            <span>{isRightSidebarOpen ? 'Hide Assistant' : 'Show Assistant'}</span>
-          </button>
-          
+      
           {/* Completion flash badge */}
           {showCompleteBadge && (
             <div className="flex items-center gap-1 bg-emerald-500/10 text-emerald-600 text-[9px] md:text-xs rounded-full border border-emerald-500/20 font-bold px-2 py-0.5 md:py-1 font-mono animate-pulse shrink-0">
@@ -1918,7 +1908,7 @@ export default function Dashboard() {
           </button>
 
           {/* Workspace Dashboard button */}
-          <button
+          {/* <button
             onClick={() => {
               setView('startup');
               loadBrandContext();
@@ -1932,7 +1922,7 @@ export default function Dashboard() {
           >
             <Building2 className="w-3.5 h-3.5 font-bold" />
             <span>Workspace</span>
-          </button>
+          </button> */}
 
           {/* Trigger Pipeline button (Desktop only) */}
           <button
@@ -1947,6 +1937,21 @@ export default function Dashboard() {
             {triggering ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Zap className="w-3.5 h-3.5" />}
             <span>{triggering ? 'Starting...' : 'Trigger Pipeline'}</span>
           </button>
+
+              {/* Hide/Show Assistant button (Desktop only) */}
+          <button
+            onClick={() => setIsRightSidebarOpen(!isRightSidebarOpen)}
+            className={`hidden md:flex items-center gap-1.5 h-9 border rounded-lg text-xs font-semibold transition-all duration-200 cursor-pointer ${
+              isRightSidebarOpen 
+                ? 'bg-[#F3E8FF] text-[#7C3AED] border-[#E9D5FF] hover:bg-[#E9D5FF]' 
+                : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50'
+            }`}
+            style={{ padding: '8px 12px' }}
+          >
+            <MessageSquare className="w-3.5 h-3.5" />
+            <span>{isRightSidebarOpen ? 'Hide Assistant' : 'Show Assistant'}</span>
+          </button>
+          
         </div>
       </header>
 
@@ -2168,20 +2173,18 @@ export default function Dashboard() {
           {view === 'startup' && (
             <div className="w-full h-full overflow-hidden flex flex-col bg-gray-50">
               {/* Header with Sub-Tabs */}
-              <div className="border-b border-gray-200 bg-white px-6 py-4 flex justify-between items-center shrink-0">
+              <div className="border-b border-gray-200 bg-white px-6 py-4 flex flex-wrap gap-4 justify-between items-center shrink-0">
                 <div>
                   <h2 className="text-lg font-bold tracking-tight text-gray-900 font-mono">Startup Workspace</h2>
                   <p className="text-xs text-gray-500 mt-0.5">Manage brand voice, connected codebases, onboarding documents, and strategic intelligence logs.</p>
                 </div>
-                <div className="flex gap-2">
-                  <button
-                    onClick={() => setView('canvas')}
-                    className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-gray-600 hover:text-gray-900 border border-gray-200 rounded-lg bg-white"
+                   <button 
+                    onClick={() => setView('canvas')} 
+                    className="flex items-center gap-1 text-xs font-bold text-blue-600 hover:text-blue-700 hover:underline"
                   >
-                    <span>Back to Canvas</span>
+                    <span>Go to Canvas</span>
                     <ArrowRight className="w-3.5 h-3.5" />
                   </button>
-                </div>
               </div>
 
               {/* Sub-Tabs Nav */}
@@ -2192,7 +2195,7 @@ export default function Dashboard() {
                     workspaceTab === 'brand' ? 'border-blue-600 text-blue-700' : 'border-transparent text-gray-500 hover:text-gray-800'
                   }`}
                 >
-                  Brand Profile & Onboarding
+                  Brand Profile
                 </button>
                 <button
                   onClick={() => setWorkspaceTab('repos')}
@@ -2200,7 +2203,7 @@ export default function Dashboard() {
                     workspaceTab === 'repos' ? 'border-blue-600 text-blue-700' : 'border-transparent text-gray-500 hover:text-gray-800'
                   }`}
                 >
-                  Repositories & Webhooks
+                  Repositories
                 </button>
                 <button
                   onClick={() => setWorkspaceTab('documents')}
@@ -2208,7 +2211,7 @@ export default function Dashboard() {
                     workspaceTab === 'documents' ? 'border-blue-600 text-blue-700' : 'border-transparent text-gray-500 hover:text-gray-800'
                   }`}
                 >
-                  Onboarding Documents Checklist ({Object.keys(documents).filter(k => !!documents[k]).length}/12)
+                  Documents Checklist ({Object.keys(documents).filter(k => !!documents[k]).length}/12)
                 </button>
                 <button
                   onClick={() => setWorkspaceTab('research')}
@@ -2216,7 +2219,7 @@ export default function Dashboard() {
                     workspaceTab === 'research' ? 'border-blue-600 text-blue-700' : 'border-transparent text-gray-500 hover:text-gray-800'
                   }`}
                 >
-                  Strategic Research Console
+                  Research Console
                 </button>
               </div>
 
@@ -2224,124 +2227,237 @@ export default function Dashboard() {
               <div className="flex-1 overflow-y-auto p-6">
                 {workspaceTab === 'brand' && (
                   <div className="max-w-3xl flex flex-col gap-6 bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
-                    {/* Jina Auto-Extractor Section */}
-                    <div className="p-4 bg-blue-50/50 border border-blue-100 rounded-xl">
-                      <h4 className="text-xs font-bold text-blue-950 font-mono flex items-center gap-1.5">
-                        <Sparkles className="w-3.5 h-3.5 text-blue-600 animate-pulse" />
-                        AI Website Onboarding Extractor
-                      </h4>
-                      <p className="text-[11px] text-blue-700 font-mono mt-1 leading-relaxed">
-                        Enter a public website URL (landing page, GitHub readme, docs). We will use Jina Scraper and LLM extraction to automatically populate your brand profile!
-                      </p>
-                      <div className="flex gap-2 mt-3">
-                        <input
-                          type="text"
-                          value={onboardUrl}
-                          onChange={e => setOnboardUrl(e.target.value)}
-                          placeholder="e.g. https://my-startup.com"
-                          className="flex-1 bg-white border border-gray-200 rounded-lg px-3.5 py-2 text-xs font-mono text-gray-900 focus:outline-none focus:border-blue-500"
-                        />
-                        <button
-                          onClick={handleAutoOnboard}
-                          disabled={onboarding}
-                          className="flex items-center gap-1.5 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-300 disabled:cursor-not-allowed text-white text-xs font-bold px-4 py-2 rounded-lg transition-colors font-mono"
-                        >
-                          {onboarding ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
-                          <span>{onboarding ? 'Extracting...' : 'AI Extract Profile'}</span>
-                        </button>
-                      </div>
-                    </div>
-
-                    {/* Brand Profile Fields */}
-                    <div className="flex flex-col gap-4">
-                      <div className="flex flex-col gap-1.5">
-                        <label className="text-[10px] font-bold uppercase tracking-wider text-gray-400 font-mono">Company / Startup Name</label>
-                        <input
-                          type="text"
-                          value={brandName}
-                          onChange={e => setBrandName(e.target.value)}
-                          placeholder="e.g. Nexus Labs"
-                          className="bg-white border border-gray-200 rounded-lg px-4 py-2.5 text-xs text-slate-900 font-mono focus:outline-none focus:border-blue-500"
-                        />
-                      </div>
-
-                      <div className="flex flex-col gap-1.5">
-                        <label className="text-[10px] font-bold uppercase tracking-wider text-gray-400 font-mono">Value Proposition</label>
-                        <textarea
-                          value={brandValueProp}
-                          onChange={e => setBrandValueProp(e.target.value)}
-                          placeholder="What problem do you solve? Who for? What makes you different?"
-                          rows={2}
-                          className="bg-white border border-gray-200 rounded-lg px-4 py-3 text-xs text-slate-900 font-mono focus:outline-none focus:border-blue-500 resize-y min-h-[72px]"
-                        />
-                      </div>
-
-                      <div className="grid grid-cols-2 gap-3">
-                        <div className="flex flex-col gap-1.5">
-                          <label className="text-[10px] font-bold uppercase tracking-wider text-gray-400 font-mono">Target Persona</label>
-                          <input
-                            type="text"
-                            value={brandPersona}
-                            onChange={e => setBrandPersona(e.target.value)}
-                            placeholder="e.g. Solo devs, lean startups"
-                            className="bg-white border border-gray-200 rounded-lg px-4 py-2.5 text-xs text-slate-900 font-mono focus:outline-none focus:border-blue-500"
-                          />
+                    {!isEditingBrand ? (
+                      /* Clean Simple Sleek Review Mode */
+                      <div className="flex flex-col gap-6 font-sans">
+                        {/* Title Row */}
+                        <div className="flex items-center justify-between pb-4 border-b border-gray-100">
+                          <div className="flex items-center gap-3.5">
+                            <div className="w-12 h-12 rounded-lg bg-blue-600/10 text-blue-600 flex items-center justify-center font-bold text-lg font-mono border border-blue-200">
+                              {brandName ? brandName.charAt(0).toUpperCase() : 'S'}
+                            </div>
+                            <div>
+                              <h3 className="text-base font-bold text-gray-900 tracking-tight font-mono uppercase">{brandName || 'Unnamed Startup'}</h3>
+                              <p className="text-[11px] text-gray-400 font-mono mt-0.5">Active Brand Profile Review</p>
+                            </div>
+                          </div>
+                          <button
+                            onClick={() => setIsEditingBrand(true)}
+                            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold font-mono text-blue-600 hover:text-blue-700 bg-blue-50 hover:bg-blue-100 rounded-lg border border-blue-200/50 transition-colors cursor-pointer"
+                          >
+                            <Edit3 className="w-3.5 h-3.5" />
+                            <span>Edit Brand Profile</span>
+                          </button>
                         </div>
+
+                        {/* Value Prop */}
                         <div className="flex flex-col gap-1.5">
-                          <label className="text-[10px] font-bold uppercase tracking-wider text-gray-400 font-mono">Brand Tone</label>
-                          <input
-                            type="text"
-                            value={brandTone}
-                            onChange={e => setBrandTone(e.target.value)}
-                            placeholder="e.g. Bold, technical, startup-energetic"
-                            className="bg-white border border-gray-200 rounded-lg px-4 py-2.5 text-xs text-slate-900 font-mono focus:outline-none focus:border-blue-500"
-                          />
+                          <span className="text-[9px] uppercase font-bold text-gray-400 font-mono tracking-wider">Value Proposition</span>
+                          <div className="p-4 bg-gray-50/70 border border-gray-200/60 rounded-xl leading-relaxed text-xs text-gray-800 font-mono whitespace-pre-wrap">
+                            {brandValueProp || 'No value proposition set. Click Edit Brand Profile to add one.'}
+                          </div>
                         </div>
-                      </div>
 
-                      <div className="flex flex-col gap-1.5">
-                        <label className="text-[10px] font-bold uppercase tracking-wider text-gray-400 font-mono">Restricted Keywords</label>
-                        <input
-                          type="text"
-                          value={brandKeywords}
-                          onChange={e => setBrandKeywords(e.target.value)}
-                          placeholder="comma-separated list of restricted words"
-                          className="bg-white border border-gray-200 rounded-lg px-4 py-2.5 text-xs text-slate-900 font-mono focus:outline-none focus:border-blue-500"
-                        />
-                      </div>
+                        {/* Metrics Grid */}
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                          <div className="flex flex-col gap-1.5">
+                            <span className="text-[9px] uppercase font-bold text-gray-400 font-mono tracking-wider">Target Persona</span>
+                            <div className="p-3.5 bg-gray-50/70 border border-gray-200/60 rounded-xl text-xs text-gray-800 font-mono">
+                              {brandPersona || 'Not set'}
+                            </div>
+                          </div>
 
-                      <div className="flex flex-col gap-1.5">
-                        <label className="text-[10px] font-bold uppercase tracking-wider text-gray-400 font-mono">Raw Brand Voice Constraints</label>
-                        <textarea
-                          value={brandVoice}
-                          onChange={e => setBrandVoice(e.target.value)}
-                          placeholder="Free-form guidelines for writing..."
-                          rows={3}
-                          className="bg-white border border-gray-200 rounded-lg px-4 py-3 text-xs text-slate-900 font-mono focus:outline-none focus:border-blue-500 resize-y min-h-[96px]"
-                        />
-                      </div>
+                          <div className="flex flex-col gap-1.5">
+                            <span className="text-[9px] uppercase font-bold text-gray-400 font-mono tracking-wider">Brand Tone</span>
+                            <div className="p-3.5 bg-gray-50/70 border border-gray-200/60 rounded-xl text-xs text-gray-800 font-mono">
+                              {brandTone || 'Not set'}
+                            </div>
+                          </div>
+                        </div>
 
-                      <button
-                        onClick={saveBrandContext}
-                        disabled={savingBrand}
-                        className={`flex items-center justify-center gap-2 w-full py-3 font-bold text-xs rounded-xl transition-all duration-200 font-mono ${
-                          brandSaved
-                            ? 'bg-emerald-600 text-white'
-                            : savingBrand
-                            ? 'bg-gray-200 text-gray-400 cursor-not-allowed'
-                            : 'bg-blue-600 hover:bg-blue-700 text-white'
-                        }`}
-                      >
-                        {savingBrand ? (
-                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                        ) : brandSaved ? (
-                          <CheckCircle2 className="w-3.5 h-3.5" />
-                        ) : (
-                          <Save className="w-3.5 h-3.5" />
+                        {/* Keywords */}
+                        <div className="flex flex-col gap-1.5">
+                          <span className="text-[9px] uppercase font-bold text-gray-400 font-mono tracking-wider">Restricted Keywords</span>
+                          <div className="p-3.5 bg-gray-50/70 border border-gray-200/60 rounded-xl flex flex-wrap gap-2">
+                            {brandKeywords ? (
+                              brandKeywords.split(',').map((kw, idx) => (
+                                <span key={idx} className="px-2 py-1 bg-red-50 text-red-700 border border-red-200/50 rounded-lg text-[10px] font-mono font-bold">
+                                  {kw.trim()}
+                                </span>
+                              ))
+                            ) : (
+                              <span className="text-xs text-gray-400 font-mono italic">No restricted keywords configured.</span>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Voice Constraints */}
+                        <div className="flex flex-col gap-1.5">
+                          <span className="text-[9px] uppercase font-bold text-gray-400 font-mono tracking-wider">Raw Brand Voice Constraints</span>
+                          <div className="p-4 bg-gray-50/70 border border-gray-200/60 rounded-xl leading-relaxed text-xs text-gray-800 font-mono whitespace-pre-wrap">
+                            {brandVoice || 'No specific voice guidelines configured yet.'}
+                          </div>
+                        </div>
+
+                        {/* Extract Hint */}
+                        {!brandName && !brandValueProp && (
+                          <div className="p-4 bg-blue-50/50 border border-blue-100 rounded-xl flex items-center justify-between gap-4 mt-2">
+                            <p className="text-xs text-blue-700 font-mono leading-normal">
+                              Your startup profile is empty. Switch to edit mode to write it manually or let AI scan your landing page.
+                            </p>
+                            <button
+                              onClick={() => setIsEditingBrand(true)}
+                              className="px-3.5 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-[10px] font-bold font-mono rounded-lg transition-colors cursor-pointer shrink-0"
+                            >
+                              Get Started
+                            </button>
+                          </div>
                         )}
-                        {brandSaved ? 'Saved! Profile is active.' : savingBrand ? 'Saving Settings...' : 'Save Brand Profile'}
-                      </button>
-                    </div>
+                      </div>
+                    ) : (
+                      /* Editable Form Mode */
+                      <div className="flex flex-col gap-6 font-sans">
+                        <div className="flex items-center justify-between pb-4 border-b border-gray-100">
+                          <div>
+                            <h3 className="text-sm font-bold text-gray-900 font-mono uppercase">Edit Startup Profile</h3>
+                            <p className="text-[10px] text-gray-400 font-mono mt-0.5">Customize active brand settings or auto-populate via website URL</p>
+                          </div>
+                          <button
+                            onClick={() => setIsEditingBrand(false)}
+                            className="text-xs font-bold font-mono text-gray-500 hover:text-gray-900 cursor-pointer"
+                          >
+                            Back to Review
+                          </button>
+                        </div>
+
+                        {/* Jina Auto-Extractor Section */}
+                        <div className="p-4 bg-blue-50/50 border border-blue-100 rounded-xl">
+                          <h4 className="text-xs font-bold text-blue-950 font-mono flex items-center gap-1.5">
+                            <Sparkles className="w-3.5 h-3.5 text-blue-600 animate-pulse" />
+                            AI Website Onboarding Extractor
+                          </h4>
+                          <p className="text-[11px] text-blue-700 font-mono mt-1 leading-relaxed">
+                            Enter a public website URL (landing page, GitHub readme, docs). We will use Jina Scraper and LLM extraction to automatically populate your brand profile!
+                          </p>
+                          <div className="flex gap-2 mt-3">
+                            <input
+                              type="text"
+                              value={onboardUrl}
+                              onChange={e => setOnboardUrl(e.target.value)}
+                              placeholder="e.g. https://my-startup.com"
+                              className="flex-1 bg-white border border-gray-200 rounded-lg px-3.5 py-2 text-xs font-mono text-gray-900 focus:outline-none focus:border-blue-500"
+                            />
+                            <button
+                              onClick={handleAutoOnboard}
+                              disabled={onboarding}
+                              className="flex items-center gap-1.5 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-300 disabled:cursor-not-allowed text-white text-xs font-bold px-4 py-2 rounded-lg transition-colors font-mono"
+                            >
+                              {onboarding ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
+                              <span>{onboarding ? 'Extracting...' : 'AI Extract Profile'}</span>
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* Brand Profile Fields */}
+                        <div className="flex flex-col gap-4">
+                          <div className="flex flex-col gap-1.5">
+                            <label className="text-[10px] font-bold uppercase tracking-wider text-gray-400 font-mono">Company / Startup Name</label>
+                            <input
+                              type="text"
+                              value={brandName}
+                              onChange={e => setBrandName(e.target.value)}
+                              placeholder="e.g. Nexus Labs"
+                              className="bg-white border border-gray-200 rounded-lg px-4 py-2.5 text-xs text-slate-900 font-mono focus:outline-none focus:border-blue-500"
+                            />
+                          </div>
+
+                          <div className="flex flex-col gap-1.5">
+                            <label className="text-[10px] font-bold uppercase tracking-wider text-gray-400 font-mono">Value Proposition</label>
+                            <textarea
+                              value={brandValueProp}
+                              onChange={e => setBrandValueProp(e.target.value)}
+                              placeholder="What problem do you solve? Who for? What makes you different?"
+                              rows={2}
+                              className="bg-white border border-gray-200 rounded-lg px-4 py-3 text-xs text-slate-900 font-mono focus:outline-none focus:border-blue-500 resize-y min-h-[72px]"
+                            />
+                          </div>
+
+                          <div className="grid grid-cols-2 gap-3">
+                            <div className="flex flex-col gap-1.5">
+                              <label className="text-[10px] font-bold uppercase tracking-wider text-gray-400 font-mono">Target Persona</label>
+                              <input
+                                type="text"
+                                value={brandPersona}
+                                onChange={e => setBrandPersona(e.target.value)}
+                                placeholder="e.g. Solo devs, lean startups"
+                                className="bg-white border border-gray-200 rounded-lg px-4 py-2.5 text-xs text-slate-900 font-mono focus:outline-none focus:border-blue-500"
+                              />
+                            </div>
+                            <div className="flex flex-col gap-1.5">
+                              <label className="text-[10px] font-bold uppercase tracking-wider text-gray-400 font-mono">Brand Tone</label>
+                              <input
+                                type="text"
+                                value={brandTone}
+                                onChange={e => setBrandTone(e.target.value)}
+                                placeholder="e.g. Bold, technical, startup-energetic"
+                                className="bg-white border border-gray-200 rounded-lg px-4 py-2.5 text-xs text-slate-900 font-mono focus:outline-none focus:border-blue-500"
+                              />
+                            </div>
+                          </div>
+
+                          <div className="flex flex-col gap-1.5">
+                            <label className="text-[10px] font-bold uppercase tracking-wider text-gray-400 font-mono">Restricted Keywords</label>
+                            <input
+                              type="text"
+                              value={brandKeywords}
+                              onChange={e => setBrandKeywords(e.target.value)}
+                              placeholder="comma-separated list of restricted words"
+                              className="bg-white border border-gray-200 rounded-lg px-4 py-2.5 text-xs text-slate-900 font-mono focus:outline-none focus:border-blue-500"
+                            />
+                          </div>
+
+                          <div className="flex flex-col gap-1.5">
+                            <label className="text-[10px] font-bold uppercase tracking-wider text-gray-400 font-mono">Raw Brand Voice Constraints</label>
+                            <textarea
+                              value={brandVoice}
+                              onChange={e => setBrandVoice(e.target.value)}
+                              placeholder="Free-form guidelines for writing..."
+                              rows={3}
+                              className="bg-white border border-gray-200 rounded-lg px-4 py-3 text-xs text-slate-900 font-mono focus:outline-none focus:border-blue-500 resize-y min-h-[96px]"
+                            />
+                          </div>
+
+                          <div className="flex gap-3 mt-2">
+                            <button
+                              onClick={() => setIsEditingBrand(false)}
+                              className="flex-1 py-3 font-bold text-xs text-gray-600 hover:text-gray-900 border border-gray-200 rounded-xl transition-all duration-200 font-mono cursor-pointer bg-white"
+                            >
+                              Cancel
+                            </button>
+                            <button
+                              onClick={saveBrandContext}
+                              disabled={savingBrand}
+                              className={`flex-1 flex items-center justify-center gap-2 py-3 font-bold text-xs rounded-xl transition-all duration-200 font-mono ${
+                                brandSaved
+                                  ? 'bg-emerald-600 text-white'
+                                  : savingBrand
+                                  ? 'bg-gray-200 text-gray-400 cursor-not-allowed'
+                                  : 'bg-blue-600 hover:bg-blue-700 text-white'
+                              }`}
+                            >
+                              {savingBrand ? (
+                                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                              ) : brandSaved ? (
+                                <CheckCircle2 className="w-3.5 h-3.5" />
+                              ) : (
+                                <Save className="w-3.5 h-3.5" />
+                              )}
+                              {brandSaved ? 'Saved! Profile is active.' : savingBrand ? 'Saving Settings...' : 'Save Brand Profile'}
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 )}
 
@@ -2575,35 +2691,35 @@ export default function Dashboard() {
                         <p className="text-xs text-gray-500 mt-1">Real-time log of competitor scrapes, site structure fetches, and Tavily queries.</p>
                       </div>
 
-                      {/* Green Terminal Console */}
-                      <div className="bg-[#0A0B0E] rounded-xl border border-[#1d1f27] overflow-hidden shadow-2xl">
-                        <div className="bg-[#12131A] px-4 py-2.5 border-b border-[#1d1f27] flex items-center justify-between select-none">
+                      {/* Light Mode Terminal Console */}
+                      <div className="bg-[#FAFBFB] rounded-xl border border-gray-200 overflow-hidden shadow-sm">
+                        <div className="bg-[#F0F1F2] px-4 py-2.5 border-b border-gray-200 flex items-center justify-between select-none">
                           <div className="flex items-center gap-1.5 font-mono">
-                            <Terminal className="w-3.5 h-3.5 text-cyan-400" />
-                            <span className="text-[9px] uppercase font-bold text-cyan-400 tracking-wider">marshall_research@shipstory: ~</span>
+                            <Terminal className="w-3.5 h-3.5 text-blue-600" />
+                            <span className="text-[9px] uppercase font-bold text-gray-600 tracking-wider">marshall_research@shipstory: ~</span>
                           </div>
                           <div className="flex gap-1.5">
-                            <span className="w-2.5 h-2.5 rounded-full bg-red-500/30 border border-red-500/50"></span>
-                            <span className="w-2.5 h-2.5 rounded-full bg-yellow-500/30 border border-yellow-500/50"></span>
-                            <span className="w-2.5 h-2.5 rounded-full bg-green-500/30 border border-green-500/50"></span>
+                            <span className="w-2.5 h-2.5 rounded-full bg-red-400/40 border border-red-400/60"></span>
+                            <span className="w-2.5 h-2.5 rounded-full bg-yellow-400/40 border border-yellow-400/60"></span>
+                            <span className="w-2.5 h-2.5 rounded-full bg-green-400/40 border border-green-400/60"></span>
                           </div>
                         </div>
-                        <div className="p-5 font-mono text-[11px] text-cyan-300/90 leading-relaxed max-h-[360px] overflow-y-auto min-h-[240px] flex flex-col gap-1.5 select-text">
+                        <div className="p-5 font-mono text-[11px] text-slate-800 leading-relaxed max-h-[360px] overflow-y-auto min-h-[240px] flex flex-col gap-1.5 select-text bg-[#FAFBFB]">
                           {state.current_session?.agent_outputs?.marshall_recommendation?.logs?.length > 0 ? (
                             state.current_session.agent_outputs.marshall_recommendation.logs.map((log: string, idx: number) => (
                               <div key={idx} className="flex gap-2 items-start">
-                                <span className="text-cyan-600 shrink-0 select-none">&gt;</span>
-                                <span>{log}</span>
+                                <span className="text-blue-500 shrink-0 select-none">&gt;</span>
+                                <span className="font-mono">{log}</span>
                               </div>
                             ))
                           ) : (
-                            <div className="text-zinc-600 italic py-2">
+                            <div className="text-gray-400 italic py-2 font-mono">
                               No execution logs found. Trigger a push simulation or campaign milestone to kickoff Marshall's strategic scraping scans.
                             </div>
                           )}
-                          <div className="flex gap-2 items-center text-cyan-500/60 select-none mt-1 animate-pulse">
+                          <div className="flex gap-2 items-center text-blue-500/50 select-none mt-1 animate-pulse">
                             <span>&gt;</span>
-                            <span className="w-1.5 h-3 bg-cyan-400"></span>
+                            <span className="w-1.5 h-3 bg-blue-500"></span>
                           </div>
                         </div>
                       </div>
@@ -2674,7 +2790,7 @@ export default function Dashboard() {
                   <p className="text-xs text-gray-500 mt-1">Review staged copy drafts and execute campaign distribution</p>
                 </div>
                 <div className="flex items-center gap-3">
-                  <button 
+                  {/* <button 
                     onClick={handleSaveDrafts}
                     disabled={savingDrafts || !outputs.gigi_content_drafts?.twitter || isViewingHistory}
                     className="flex items-center gap-1.5 h-9 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-100 disabled:text-gray-400 disabled:cursor-not-allowed text-white font-semibold text-xs transition-colors rounded-lg px-4"
@@ -2689,7 +2805,7 @@ export default function Dashboard() {
                   >
                     <Globe className="w-3.5 h-3.5" />
                     <span>Publish</span>
-                  </button>
+                  </button> */}
                   <button 
                     onClick={() => setView('canvas')} 
                     className="flex items-center gap-1 text-xs font-bold text-blue-600 hover:text-blue-700 hover:underline"
@@ -2709,8 +2825,9 @@ export default function Dashboard() {
                     
                     {/* Twitter Post Card */}
                     <div className="bg-white border border-gray-200 rounded-xl p-5 flex flex-col gap-3" style={{ padding: '20px' }}>
+                                             <span className="text-[10px] uppercase font-bold text-blue-500 font-mono">Twitter Announcement</span>
+
                       <div className="flex justify-between items-center">
-                        <span className="text-[10px] uppercase font-bold text-blue-500 font-mono">Twitter Announcement</span>
                         <div className="flex items-center gap-2">
                           <div className="flex items-center gap-1 bg-gray-100 p-0.5 rounded-lg border border-gray-200">
                             <button
@@ -2775,8 +2892,9 @@ export default function Dashboard() {
 
                     {/* LinkedIn Card */}
                     <div className="bg-white border border-gray-200 rounded-xl p-5 flex flex-col gap-3" style={{ padding: '20px' }}>
+                                             <span className="text-[10px] uppercase font-bold text-[#0A66C2] font-mono">LinkedIn Campaign Post</span>
+
                       <div className="flex justify-between items-center">
-                        <span className="text-[10px] uppercase font-bold text-[#0A66C2] font-mono">LinkedIn Campaign Post</span>
                         <div className="flex items-center gap-2">
                           <div className="flex items-center gap-1 bg-gray-100 p-0.5 rounded-lg border border-gray-200">
                             <button
@@ -2841,8 +2959,9 @@ export default function Dashboard() {
 
                     {/* Changelog Card */}
                     <div className="bg-white border border-gray-200 rounded-xl p-5 flex flex-col gap-3" style={{ padding: '20px' }}>
+                                              <span className="text-[10px] uppercase font-bold text-green-600 font-mono">Changelog Entry</span>
+
                       <div className="flex justify-between items-center">
-                        <span className="text-[10px] uppercase font-bold text-green-600 font-mono">Changelog Entry</span>
                         <div className="flex items-center gap-2">
                           <div className="flex items-center gap-1 bg-gray-100 p-0.5 rounded-lg border border-gray-200">
                             <button
@@ -2907,8 +3026,9 @@ export default function Dashboard() {
 
                     {/* Newsletter Card */}
                     <div className="bg-white border border-gray-200 rounded-xl p-5 flex flex-col gap-3" style={{ padding: '20px' }}>
+                                             <span className="text-[10px] uppercase font-bold text-purple-600 font-mono">Newsletter Draft</span>
+
                       <div className="flex justify-between items-center">
-                        <span className="text-[10px] uppercase font-bold text-purple-600 font-mono">Newsletter Draft</span>
                         <div className="flex items-center gap-2">
                           <div className="flex items-center gap-1 bg-gray-100 p-0.5 rounded-lg border border-gray-200">
                             <button
