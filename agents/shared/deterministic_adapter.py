@@ -120,6 +120,7 @@ class DeterministicAgentAdapter(CrewAIAdapter):
         logger.info(f"[{self.original_agent_name.upper()}] received message content: {content!r}, metadata: {msg.metadata!r}, target_handle: {target_handle!r}")
         
         is_github_commit = "[github_commit]" in content.lower()
+        is_campaign_trigger = "[manual_campaign]" in content.lower()
 
         # If it is a new commit trigger, check if we need to initialize a new session in the DB
         if is_github_commit:
@@ -192,8 +193,8 @@ class DeterministicAgentAdapter(CrewAIAdapter):
                 else:
                     session_time = session_time.astimezone(timezone.utc)
                 
-                # Bypass timestamp check for new commit triggers to avoid clock drift issues
-                if not is_github_commit and msg_time < session_time:
+                # Bypass timestamp check for new commit and campaign triggers to avoid clock drift issues
+                if not is_github_commit and not is_campaign_trigger and msg_time < session_time:
                     logger.info(f"[{self.original_agent_name.upper()}] Skipping message from previous session. msg_time={msg_time}, session_time={session_time}")
                     return
         except Exception as e:
@@ -275,6 +276,9 @@ class DeterministicAgentAdapter(CrewAIAdapter):
             milestones = "\n".join([f"- {m}" for m in assets.get("active_milestones", [])])
             epic_pcts = "\n".join([f"- {k}: {v}%" for k, v in assets.get("epic_progress_percentages", {}).items()])
             
+            docs = assets.get("documents", {})
+            documents_list = "\n".join([f"- {k}: {v}" for k, v in docs.items()]) if docs else "None uploaded yet"
+            
             commit_msg = raw_inputs.get("commit_message", "N/A")
             changed_files = ", ".join(raw_inputs.get("changed_files", []))
             
@@ -314,6 +318,8 @@ Active Milestones:
 {milestones}
 Epic Progress:
 {epic_pcts}
+Startup Documents Checklist:
+{documents_list}
 
 [Current Session State]
 Session ID: {session.get('session_id', 'sess_default')}
@@ -576,30 +582,81 @@ Changed Files: {changed_files}
         except Exception as e:
             logger.error(f"[{self.original_agent_name.upper()}] Failed to inject company brain context: {e}")
 
-        # Setup standard CrewAI context variables
-        from band.integrations.crewai import ReplyTracker
-        from band.adapters.crewai import _current_room_context, _reply_tracker_var
-
-        reply_tracker = ReplyTracker()
-        _current_room_context.set((room_id, tools))
-        _reply_tracker_var.set(reply_tracker)
-
         try:
-            # Execute actual CrewAI kickoff
-            await self._process_message(
-                msg=msg,
-                tools=tools,
-                history=history,
-                participants_msg=participants_msg,
-                contacts_msg=contacts_msg,
-                is_session_bootstrap=is_session_bootstrap,
-                room_id=room_id,
-                reply_tracker=reply_tracker,
+            is_campaign_msg = "[manual_campaign]" in content.lower()
+            is_commit_msg = "[github_commit]" in content.lower()
+            is_pure_chat = (
+                self.original_agent_name == "connie_assistant" or
+                (self.original_agent_name == "marshall_research" and not is_campaign_msg and not is_commit_msg)
             )
 
-            # Retrieve result raw output
-            history_list = self._message_history.get(room_id, [])
-            last_output = history_list[-1]["content"] if history_list else ""
+            last_output = ""
+            if is_pure_chat:
+                logger.info(f"[{self.original_agent_name.upper()}] Bypassing CrewAI for pure chat response.")
+                import litellm
+                
+                # Fetch fresh chat history context from state
+                state_fresh = StateManager.load_state(room_id=room_id)
+                chat_history = state_fresh.get("current_session", {}).get("chat_history", []) if state_fresh else []
+                
+                # Build messages payload for LiteLLM
+                messages = [
+                    {"role": "system", "content": f"{self._crewai_agent.backstory}"},
+                ]
+                
+                # Append last 10 messages for context
+                for h_msg in chat_history[-10:]:
+                    sender = h_msg.get("sender")
+                    msg_text = h_msg.get("message")
+                    if sender and msg_text:
+                        is_current_agent = (
+                            (self.original_agent_name == "connie_assistant" and sender == "connie") or
+                            (self.original_agent_name == "marshall_research" and sender == "marshall")
+                        )
+                        role = "assistant" if is_current_agent else "user"
+                        messages.append({"role": role, "content": msg_text})
+                
+                # Append current message content
+                messages.append({"role": "user", "content": content})
+                
+                # Run the direct completion call
+                response = await asyncio.to_thread(
+                    litellm.completion,
+                    model=self.llm_obj.model,
+                    messages=messages,
+                    api_key=getattr(self.llm_obj, "api_key", None) or os.getenv("AIML_API_KEY") or os.getenv("OPENAI_API_KEY"),
+                    api_base=getattr(self.llm_obj, "base_url", None) or os.getenv("AIML_API_BASE") or os.getenv("OPENAI_API_BASE")
+                )
+                last_output = response.choices[0].message.content
+                
+                # Record to _message_history
+                if room_id not in self._message_history:
+                    self._message_history[room_id] = []
+                self._message_history[room_id].append({"role": self.original_agent_name, "content": last_output})
+            else:
+                # Setup standard CrewAI context variables
+                from band.integrations.crewai import ReplyTracker
+                from band.adapters.crewai import _current_room_context, _reply_tracker_var
+
+                reply_tracker = ReplyTracker()
+                _current_room_context.set((room_id, tools))
+                _reply_tracker_var.set(reply_tracker)
+
+                # Execute actual CrewAI kickoff
+                await self._process_message(
+                    msg=msg,
+                    tools=tools,
+                    history=history,
+                    participants_msg=participants_msg,
+                    contacts_msg=contacts_msg,
+                    is_session_bootstrap=is_session_bootstrap,
+                    room_id=room_id,
+                    reply_tracker=reply_tracker,
+                )
+
+                # Retrieve result raw output
+                history_list = self._message_history.get(room_id, [])
+                last_output = history_list[-1]["content"] if history_list else ""
 
             if last_output:
                 # Run deterministic state updates and next-step triggers
@@ -840,7 +897,7 @@ Changed Files: {changed_files}
                 "audit_status": "PENDING"
             }
             
-            state = StateManager.load_state()
+            state = StateManager.load_state(room_id=room_id)
             if "evolutionary_feedback_loop" not in state:
                 state["evolutionary_feedback_loop"] = {"incoming_community_signals": [], "active_recommendations": []}
             if "active_recommendations" not in state["evolutionary_feedback_loop"]:

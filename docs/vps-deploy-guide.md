@@ -17,7 +17,7 @@ sudo apt update
 sudo apt install -y git curl build-essential python3 python3-venv python3-pip
 ```
 
-## 2. Create a deploy user - NOT DONE
+## 2. Create a deploy user - NOT REQUIRED I SKIPPED
 
 Running the agents as a normal user is cleaner than using `root`.
 
@@ -55,7 +55,7 @@ If `uv` is already available on your Hostinger image, you can skip this step.
 The Python workspace lives in `agents/`.
 
 ```bash
-cd /srv/shipstory/agents
+cd /shipstory/agents
 uv sync
 ```
 
@@ -66,7 +66,7 @@ That will create the environment and install the dependencies defined in `agents
 The agent modules load environment variables from `agents/.env`, so place the file there.
 
 ```bash
-cd /srv/shipstory/agents
+cd /shipstory/agents
 nano .env
 ```
 
@@ -166,7 +166,7 @@ sudo journalctl -u shipstory-agents -f
 For future deployments:
 
 ```bash
-cd /srv/shipstory
+cd /shipstory
 git pull
 cd agents
 uv sync

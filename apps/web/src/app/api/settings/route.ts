@@ -68,6 +68,27 @@ export async function GET(request: Request) {
     if (!company_metadata.connected_repos) {
       company_metadata.connected_repos = [];
     }
+
+    let startups: Array<{ id: string; name: string }> = [];
+    try {
+      await connectMongoose();
+      const docs = await CompanyBrain.find({
+        _id: { $not: /^active_context_/ }
+      }).lean();
+      startups = docs.map((d: any) => {
+        const id = d._id === 'nexus_labs_brain' ? 'nexus_labs' : d._id.replace('company_brain_', '');
+        const name = d.company_metadata?.name || (d._id === 'nexus_labs_brain' ? 'Nexus Labs' : id);
+        return { id, name };
+      });
+    } catch (err) {
+      console.error('[Settings API] Error loading startups:', err);
+      // Fallback
+      startups = [
+        { id: 'qleva', name: 'Qleva' },
+        { id: 'nexus_labs', name: 'Nexus Labs' }
+      ];
+    }
+
     return NextResponse.json({
       company_metadata,
       operational_assets: {
@@ -76,6 +97,7 @@ export async function GET(request: Request) {
         pitch_deck_summary: state.operational_assets?.pitch_deck_summary || '',
         documents: state.operational_assets?.documents || {}
       },
+      startups
     });
   } catch (error) {
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });

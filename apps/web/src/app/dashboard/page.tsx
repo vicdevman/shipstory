@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { 
   ReactFlow, 
   MiniMap, 
@@ -646,9 +646,11 @@ export default function Dashboard() {
   // Connie Chat Box State
   const [chatMessage, setChatMessage] = useState('');
   const [sendingChat, setSendingChat] = useState(false);
+  const [optimisticMessages, setOptimisticMessages] = useState<any[]>([]);
   const chatScrollContainerRef = useRef<HTMLDivElement>(null);
   const chatBottomRef = useRef<HTMLDivElement>(null);
   const isChatNearBottomRef = useRef(true);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   // Toolbar settings
   const [showGrid, setShowGrid] = useState(true);
@@ -689,9 +691,9 @@ export default function Dashboard() {
   const [startupList, setStartupList] = useState<Array<{ id: string; name: string }>>([
     { id: 'qleva', name: 'Qleva' },
     { id: 'nexus_labs', name: 'Nexus Labs' },
-    { id: 'orbit_sync', name: 'Orbit Sync' },
-    { id: 'saas_flow', name: 'SaaS Flow' },
-    { id: 'documind_ai', name: 'DocuMind AI' }
+    // { id: 'orbit_sync', name: 'Orbit Sync' },
+    // { id: 'saas_flow', name: 'SaaS Flow' },
+    // { id: 'documind_ai', name: 'DocuMind AI' }
   ]);
   const [workspaceTab, setWorkspaceTab] = useState<'brand' | 'repos' | 'documents' | 'research'>('brand');
 
@@ -800,7 +802,51 @@ export default function Dashboard() {
     return () => clearInterval(interval);
   }, [fetchState]);
 
-  const currentChatHistory = state?.current_session?.chat_history || [];
+  const dbChatHistory = state?.current_session?.chat_history || [];
+  const currentChatHistory = useMemo(() => {
+    const dbMessagesTexts = new Set(dbChatHistory.map((m: any) => m.message));
+    const filteredOptimistic = optimisticMessages.filter(m => !dbMessagesTexts.has(m.message));
+    return [...dbChatHistory, ...filteredOptimistic];
+  }, [dbChatHistory, optimisticMessages]);
+
+  const isWaitingForMarshall = useMemo(() => {
+    if (currentChatHistory.length === 0) return false;
+    let lastConnieIndex = -1;
+    let lastMarshallIndex = -1;
+    for (let i = currentChatHistory.length - 1; i >= 0; i--) {
+      const msg = currentChatHistory[i];
+      if (msg.sender === 'connie' && lastConnieIndex === -1) {
+        lastConnieIndex = i;
+      }
+      if (msg.sender === 'marshall' && lastMarshallIndex === -1) {
+        lastMarshallIndex = i;
+      }
+    }
+    if (lastConnieIndex > lastMarshallIndex) {
+      const connieMsg = currentChatHistory[lastConnieIndex].message || '';
+      if (connieMsg.toLowerCase().includes('@vicdevman/marshall') || connieMsg.toLowerCase().includes('@marshall')) {
+        return true;
+      }
+    }
+    return false;
+  }, [currentChatHistory]);
+
+  const connieSampleQuestions = [
+    "Who is on the team?",
+    "What documents do we have ready?",
+    "@vicdevman/marshall who are our competitors and do you have any recommendations for how we overtake them?",
+    "@vicdevman/marshall scan current market trends and pricing feature gaps for our product category",
+    "What is our active milestones and epic progress?",
+    "Draft a copy campaign focusing on our performance advantage"
+  ];
+
+  const campaignSampleTopics = [
+    "Obsidian vs Logseq: analyze sync reliability and pricing gaps",
+    "How to overtake competitors on P2P sync speed",
+    "Competitor compliance loopholes in collaborative note-taking",
+    "Highlighting P2P security benefits for crypto users",
+    "Outages in competitor services and how we exploit them"
+  ];
 
   // Auto-scroll chat box only when the user is already near the bottom.
   const handleChatScroll = useCallback(() => {
@@ -819,7 +865,7 @@ export default function Dashboard() {
   useEffect(() => {
     if (currentChatHistory.length > 0) {
       const lastMsg = currentChatHistory[currentChatHistory.length - 1];
-      if (lastMsg.sender === 'connie') {
+      if (lastMsg.sender !== 'user') {
         setConnieThinking(false);
         setConnieSlowWarning(false);
         if (connieTimerRef.current) {
@@ -829,6 +875,15 @@ export default function Dashboard() {
       }
     }
   }, [currentChatHistory]);
+
+  // Adjust textarea height dynamically to auto-grow
+  useEffect(() => {
+    const textarea = textareaRef.current;
+    if (textarea) {
+      textarea.style.height = 'auto';
+      textarea.style.height = `${Math.min(textarea.scrollHeight, 140)}px`;
+    }
+  }, [chatMessage]);
 
   // Determine active session dynamically
   const isViewingHistory = !!selectedSessionId && selectedSessionId !== state?.current_session?.session_id;
@@ -1055,6 +1110,9 @@ export default function Dashboard() {
       setBrandVoice(cm.raw_brand_voice_constraints || '');
       setConnectedRepos(cm.connected_repos || []);
       setDocuments(oa.documents || {});
+      if (data.startups && Array.isArray(data.startups) && data.startups.length > 0) {
+        setStartupList(data.startups);
+      }
     } catch (err) {
       console.error('[Brand] Failed to load brand context:', err);
     }
@@ -1724,6 +1782,15 @@ export default function Dashboard() {
     setConnieThinking(true);
     setConnieSlowWarning(false);
 
+    // Optimistically add user message
+    const tempUserMsg = {
+      id: `temp_user_${Date.now()}`,
+      sender: 'user',
+      message: messageToSend,
+      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+    };
+    setOptimisticMessages(prev => [...prev, tempUserMsg]);
+
     if (connieTimerRef.current) clearTimeout(connieTimerRef.current);
     connieTimerRef.current = setTimeout(() => {
       setConnieSlowWarning(true);
@@ -1755,6 +1822,15 @@ export default function Dashboard() {
       }
     } finally {
       setSendingChat(false);
+      setOptimisticMessages([]); // clear optimistic list
+    }
+  };
+
+  const handleTextareaKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      const fakeEvent = { preventDefault: () => {} } as any;
+      handleSendChat(fakeEvent);
     }
   };
 
@@ -1776,7 +1852,7 @@ export default function Dashboard() {
   const feedback = state.evolutionary_feedback_loop || {};
   const outputs = session.agent_outputs || {};
   const rejections = session.rejections_and_memos || [];
-  const chatHistory = session.chat_history || [];
+  const chatHistory = isViewingHistory ? (session.chat_history || []) : currentChatHistory;
 
   const toggleSection = (section: string) => {
     setOpenSidebarSections((prev) => ({
@@ -2790,7 +2866,7 @@ export default function Dashboard() {
                   <p className="text-xs text-gray-500 mt-1">Review staged copy drafts and execute campaign distribution</p>
                 </div>
                 <div className="flex items-center gap-3">
-                  {/* <button 
+                 <button 
                     onClick={handleSaveDrafts}
                     disabled={savingDrafts || !outputs.gigi_content_drafts?.twitter || isViewingHistory}
                     className="flex items-center gap-1.5 h-9 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-100 disabled:text-gray-400 disabled:cursor-not-allowed text-white font-semibold text-xs transition-colors rounded-lg px-4"
@@ -2798,7 +2874,7 @@ export default function Dashboard() {
                     {savingDrafts ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
                     <span>Save</span>
                   </button>
-                  <button 
+                  {/*  <button 
                     onClick={handlePublishCampaign}
                     disabled={outputs.approval_status !== 'APPROVED' || isViewingHistory}
                     className="flex items-center gap-1.5 h-9 bg-emerald-600 hover:bg-emerald-700 disabled:bg-gray-100 disabled:text-gray-400 disabled:cursor-not-allowed text-white font-semibold text-xs transition-colors rounded-lg px-4"
@@ -3400,26 +3476,53 @@ export default function Dashboard() {
                         )}
                       </div>
                     )}
+                    {isWaitingForMarshall && (
+                      <div className="flex flex-col gap-1 max-w-[85%] self-start items-start animate-pulse">
+                        <span className="text-[9px] font-bold font-mono text-blue-500 px-1">Marshall</span>
+                        <div className="rounded-xl text-xs leading-relaxed font-mono px-3 py-2 bg-blue-50 border border-blue-200 text-blue-600 rounded-bl-none flex items-center gap-2">
+                          <Loader2 className="w-3.5 h-3.5 animate-spin text-blue-500" />
+                          <span>Marshall is scanning competitor intelligence...</span>
+                        </div>
+                      </div>
+                    )}
                     <div ref={chatBottomRef} />
                   </div>
+
+                  {/* Quick Questions Pills */}
+                  {!isViewingHistory && (
+                    <div className="flex gap-1.5 overflow-x-auto px-3 py-2 border-t border-gray-100 bg-slate-50/50 scrollbar-none shrink-0">
+                      {connieSampleQuestions.map((q, idx) => (
+                        <button
+                          key={idx}
+                          type="button"
+                          onClick={() => setChatMessage(q)}
+                          className="text-[10px] font-mono whitespace-nowrap px-3 py-1 bg-white hover:bg-blue-50 border border-gray-200 hover:border-blue-300 rounded-full text-slate-600 hover:text-blue-600 transition-colors shrink-0 cursor-pointer shadow-sm"
+                        >
+                          {q}
+                        </button>
+                      ))}
+                    </div>
+                  )}
 
                   {/* Chat Input form */}
                   <form 
                     onSubmit={handleSendChat} 
-                    className="border-t border-gray-100 flex gap-2 bg-white shrink-0 p-2.5"
+                    className="border-t border-gray-100 flex gap-2 bg-white shrink-0 p-2.5 items-end"
                   >
-                    <input 
-                      type="text" 
+                    <textarea 
+                      ref={textareaRef}
                       value={chatMessage}
                       onChange={(e) => setChatMessage(e.target.value)}
-                      placeholder={isViewingHistory ? "Run history chat is read-only..." : "Ask Connie status..."}
+                      onKeyDown={handleTextareaKeyDown}
+                      placeholder={isViewingHistory ? "Run history chat is read-only..." : "Ask Connie status... (Shift+Enter for new line)"}
                       disabled={sendingChat || isViewingHistory}
-                      className="flex-1 border border-gray-200 rounded-lg text-xs text-gray-800 focus:outline-none focus:border-blue-500 disabled:opacity-50 disabled:bg-gray-50 font-mono px-3.5 py-2.5"
+                      rows={1}
+                      className="flex-1 border border-gray-200 rounded-lg text-xs text-gray-800 focus:outline-none focus:border-blue-500 disabled:opacity-50 disabled:bg-gray-50 font-mono px-3 py-2 resize-none min-h-[36px] max-h-[140px] overflow-y-auto leading-relaxed"
                     />
                     <button 
                       type="submit" 
                       disabled={sendingChat || !chatMessage.trim() || isViewingHistory}
-                      className="bg-blue-600 hover:bg-blue-700 disabled:bg-gray-100 text-white disabled:text-gray-400 rounded-lg flex items-center justify-center shrink-0 w-9 h-9 transition-colors cursor-pointer"
+                      className="bg-blue-600 hover:bg-blue-700 disabled:bg-slate-100 text-white disabled:text-slate-400 rounded-lg flex items-center justify-center shrink-0 w-9 h-9 transition-colors cursor-pointer"
                     >
                       {sendingChat ? (
                         <Loader2 className="w-4.5 h-4.5 animate-spin" />
@@ -3809,6 +3912,22 @@ export default function Dashboard() {
                       rows={5}
                       className="bg-white border border-slate-200 rounded-lg px-4 py-3 text-sm text-slate-900 font-mono placeholder-slate-400 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 resize-y min-h-[140px] transition-colors"
                     />
+                  </div>
+                  {/* Suggested Topics Pills */}
+                  <div className="flex flex-col gap-1.5">
+                    <label className="text-[9px] font-bold uppercase tracking-wider text-gray-400 font-mono">Suggested Topics</label>
+                    <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-none">
+                      {campaignSampleTopics.map((t, idx) => (
+                        <button
+                          key={idx}
+                          type="button"
+                          onClick={() => setCustomCampaignPrompt(t)}
+                          className="text-[10px] font-mono whitespace-nowrap px-3 py-1.5 bg-slate-100 hover:bg-blue-50 border border-slate-200 hover:border-blue-300 rounded-full text-slate-700 hover:text-blue-700 transition-colors shrink-0 cursor-pointer"
+                        >
+                          {t}
+                        </button>
+                      ))}
+                    </div>
                   </div>
                   {/* Brand context reminder */}
                   {brandName && (
