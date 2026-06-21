@@ -283,9 +283,9 @@ export async function POST(request: Request) {
 
     // Send direct HTTP call to Band room API for commit trigger
     // Send direct HTTP call to Band room API for trigger
-    let connieApiKey = process.env.CONNIE_API_KEY || '';
-    let devinId = process.env.DEVIN_AGENT_ID || '';
-    let marshallId = process.env.MARSHALL_AGENT_ID || '';
+    let connieApiKey = process.env.CONNIE_API_KEY || process.env.DEVIN_API_KEY || '';
+    let devinId = process.env.DEVIN_AGENT_ID || '782a7cd4-849e-447f-898c-459cb8f20248';
+    let marshallId = process.env.MARSHALL_AGENT_ID || '5a9397ba-8c1d-4548-89e1-0839e4d70e49';
 
     const agentConfig = getAgentConfig();
     if (agentConfig) {
@@ -343,23 +343,24 @@ export async function POST(request: Request) {
         }
       };
 
-      fetch(url, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-API-Key': connieApiKey
-        },
-        body: JSON.stringify(bodyPayload)
-      }).then(async (res) => {
+      try {
+        const res = await fetch(url, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-API-Key': connieApiKey
+          },
+          body: JSON.stringify(bodyPayload)
+        });
         if (!res.ok) {
           const text = await res.text();
           console.error(`[Band API] Failed to post trigger to Band room: ${res.status} ${text}`);
         } else {
           console.log(`[Band API] Successfully posted trigger to Band room.`);
         }
-      }).catch((err) => {
+      } catch (err) {
         console.error(`[Band API] Fetch error posting trigger to Band room:`, err);
-      });
+      }
     } else {
       console.warn(`[Band API] Cannot send trigger directly: missing keys or room_id. Spawning trigger_commit.py fallback.`);
       const { exec } = require('child_process');

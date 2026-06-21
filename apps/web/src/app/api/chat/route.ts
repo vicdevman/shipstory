@@ -158,23 +158,24 @@ export async function POST(request: Request) {
         }
       };
 
-      fetch(url, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-API-Key': devinApiKey
-        },
-        body: JSON.stringify(bodyPayload)
-      }).then(async (res) => {
+      try {
+        const res = await fetch(url, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-API-Key': devinApiKey
+          },
+          body: JSON.stringify(bodyPayload)
+        });
         if (!res.ok) {
           const text = await res.text();
           console.error(`[Band API] Failed to post message to Band room: ${res.status} ${text}`);
         } else {
           console.log(`[Band API] Successfully posted message to Band room.`);
         }
-      }).catch((err) => {
+      } catch (err) {
         console.error(`[Band API] Fetch error posting message to Band room:`, err);
-      });
+      }
     } else {
       console.error(`[Band API] Cannot send chat message: missing devinApiKey (${!!devinApiKey}), roomId (${!!roomId}), or connieId (${!!connieId}).`);
       return NextResponse.json(
